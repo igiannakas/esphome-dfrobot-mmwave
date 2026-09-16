@@ -36,6 +36,7 @@ struct FakeRadar {
   bool emit_sentences = true;
   bool deaf_tx = false;              // processes commands and changes state but sends nothing (TX wire cut)
   bool clamp_trigger_range = false;  // optional quirk: trig <= max - min (the real firmware does not do this)
+  float inhibit_report_skew = 0.0f;  // quirk: getInhibit reports the stored value plus this (extra decimals)
   bool dirty_on_failed_set = false;  // quirk used to exercise "can't startSensor"
   bool reject_sets = false;          // every set* answers Error
   bool silent_unknown = false;       // unknown commands get no reply at all (not even the prompt)
@@ -362,7 +363,7 @@ struct FakeRadar {
       float hi = this->model == Model::MODEL_SEN0610 ? 12.0f : (c4001 ? (speed_app ? 26.0f : 25.0f) : 9.45f);
       if (c4001) {
         mn = std::max(mn, speed_app ? 0.0f : 0.3f);  // clamps seen on the bench
-        mx = std::min(std::max(mx, 2.4f), hi);
+        mx = std::min(std::max(mx, this->model == Model::MODEL_SEN0610 ? 1.2f : 2.4f), hi);
       }
       if (mn >= mx || mx > hi + 1e-3f) {
         this->set_error();
@@ -382,7 +383,7 @@ struct FakeRadar {
         this->set_error();
         return;
       }
-      float t = std::max(a[0], 2.4f);
+      float t = std::max(a[0], this->model == Model::MODEL_SEN0610 ? 1.2f : 2.4f);
       if (this->clamp_trigger_range && t > this->range_max - this->range_min)
         t = this->range_max - this->range_min;
       this->trig = t;
@@ -425,7 +426,7 @@ struct FakeRadar {
       this->set_done();
     } else if (n == "getInhibit" && c4001) {
       if (this->get_allowed())
-        this->response({this->inhibit});
+        this->response({this->inhibit + this->inhibit_report_skew});
     } else if (n == "setInhibit" && c4001 && a.size() == 1) {
       if (!this->stopped_or_fail())
         return;

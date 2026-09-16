@@ -96,6 +96,8 @@ const ParamSpec &param_spec(ParamId id);
 const GroupSpec &group_spec(GroupId id);
 const char *param_name(ParamId id);
 Limits param_limits(Model m, ParamId id);
+/// Rounds a value to as many decimals as `step` has (0.1 -> 1, 0.025 -> 3), not onto the step grid.
+float round_to_step_decimals(float value, float step);
 Support param_support(Model m, ParamId id);
 Support group_support(Model m, GroupId id);
 /// Union of the member modes of a group on this model (MODE_MASK_BOTH on SEN0395).

@@ -2,6 +2,8 @@
 
 #include "mmwave_params.h"
 
+#include <cmath>
+
 namespace esphome::dfrobot_mmwave::protocol {
 
 // clang-format off
@@ -89,6 +91,19 @@ uint8_t group_modes(Model m, GroupId id) {
       modes |= PARAM_SPECS[i].modes;
   }
   return modes == 0 ? MODE_MASK_BOTH : modes;
+}
+
+float round_to_step_decimals(float value, float step) {
+  if (!std::isfinite(value) || !(step > 0.0f))
+    return value;
+  double scale = 1.0;
+  for (int d = 0; d < 6; d++) {
+    const double scaled = static_cast<double>(step) * scale;
+    if (std::fabs(scaled - std::round(scaled)) < 1e-3)
+      break;
+    scale *= 10.0;
+  }
+  return static_cast<float>(std::round(static_cast<double>(value) * scale) / scale);
 }
 
 Limits param_limits(Model m, ParamId id) {

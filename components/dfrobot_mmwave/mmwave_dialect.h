@@ -55,7 +55,7 @@ inline constexpr Dialect DIALECTS[MODEL_COUNT] = {
      /* min_range */ {0.0f, 9.3f, 0.15f},   /* max_range */ {0.15f, 9.45f, 0.15f}, /* trigger_range */ {0.0f, 0.0f, 0.1f},
      /* on_latency */ {0.0f, 100.0f, 0.025f}, /* off_latency */ {0.5f, 1500.0f, 0.1f}, /* inhibit */ {0.0f, 0.0f, 0.1f},
      /* uart_period */ {0.025f, 1500.0f, 0.025f}},
-    // C4001 firmware: min range floor 0.3 m, max/trigger range floor 2.4 m, on-latency ceiling 2 s, off-latency
+    // C4001 firmware: min range floor 0.3 m, max/trigger range floor 2.4 m (SEN0610: 1.2 m), on-latency ceiling 2 s, off-latency
     // floor 2 s, inhibit 0.3..60 s, report period floor 0.2 s; the speed app reports ranges of 0..26 m.
     {Model::MODEL_SEN0609, "SEN0609", "DFRobot:/> ", "DFHPD", "DFDMD", 9600, 200, 800, 1500, 3000,
      true, true, true, false, false,
@@ -64,7 +64,7 @@ inline constexpr Dialect DIALECTS[MODEL_COUNT] = {
      /* uart_period */ {0.2f, 1500.0f, 0.025f}},
     {Model::MODEL_SEN0610, "SEN0610", "DFRobot:/> ", "DFHPD", "DFDMD", 9600, 200, 800, 1500, 3000,
      true, false, true, false, false,
-     /* min_range */ {0.3f, 11.9f, 0.1f}, /* max_range */ {2.4f, 12.0f, 0.1f}, /* trigger_range */ {2.4f, 12.0f, 0.1f},
+     /* min_range */ {0.3f, 11.9f, 0.1f}, /* max_range */ {1.2f, 12.0f, 0.1f}, /* trigger_range */ {1.2f, 12.0f, 0.1f},
      /* on_latency */ {0.0f, 2.0f, 0.01f}, /* off_latency */ {2.0f, 1500.0f, 0.5f}, /* inhibit */ {0.3f, 60.0f, 0.1f},
      /* uart_period */ {0.2f, 1500.0f, 0.025f}},
 };

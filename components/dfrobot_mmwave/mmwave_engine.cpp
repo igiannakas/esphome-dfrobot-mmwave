@@ -139,7 +139,9 @@ void Engine::publish_param_(ParamId id) {
   if (param_support(this->cfg_.model, id) == Support::SUPPORT_NO)
     return;
   const ParamState &s = this->params_[id];
-  this->host_->on_param(id, s.reported, s.reported_valid && this->param_in_current_mode_(id));
+  // the radar can keep more decimals than the setting's step (a C4001 inhibit time read back as 3.101)
+  const float shown = round_to_step_decimals(s.reported, param_limits(this->cfg_.model, id).step);
+  this->host_->on_param(id, shown, s.reported_valid && this->param_in_current_mode_(id));
 }
 
 bool Engine::param_in_current_mode_(ParamId id) const {
