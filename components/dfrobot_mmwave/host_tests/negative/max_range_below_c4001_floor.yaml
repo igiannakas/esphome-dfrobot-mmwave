@@ -1,0 +1,18 @@
+# expect: max_range must be between 2.4 and 26 on the SEN0609, got 1.2
+packages:
+  base: !include _base.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+dfrobot_mmwave:
+  id: radar
+  model: SEN0609
+interval:
+  - interval: 1h
+    then:
+      - dfrobot_mmwave.set_parameter:
+          id: radar
+          parameter: max_range
+          value: 1.2

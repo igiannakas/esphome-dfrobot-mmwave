@@ -1,0 +1,100 @@
+# dfrobot_mmwave hardware test — SEN0395 (leapMMW HS2xx3A, 9 m) on a XIAO ESP32-C6
+#
+# Radar wiring:  V -> 5V (USB VBUS)   G -> GND   RX -> D6 (GPIO16)   TX -> D7 (GPIO17)   IO2 -> D3 (GPIO21)
+# The radar needs 3.6-5.5 V; its TX and IO2 are 3.3 V logic, safe for the C6.
+# Flash:  esphome run examples/bench/bench-sen0395.yaml
+
+substitutions:
+  device_name: radar-test-sen0395
+  friendly_name: "Radar test SEN0395"
+  baud_rate: "115200"
+
+packages:
+  common: !include bench-common.yaml
+
+dfrobot_mmwave:
+  id: radar
+  uart_id: radar_uart
+  model: SEN0395
+  presence_pin: ${presence_pin}   # input with pull-down by default
+  target_timeout: 2s
+
+binary_sensor:
+  - platform: dfrobot_mmwave
+    occupancy:
+      name: Occupancy
+      device_class: occupancy
+    uart_occupancy:
+      name: Occupancy (UART)
+    out_pin_occupancy:
+      name: Occupancy (OUT pin)
+    link_ok:
+      name: Radar link
+
+number:
+  - platform: dfrobot_mmwave
+    min_range:
+      name: Min range
+    max_range:
+      name: Max range
+    sensitivity:
+      name: Sensitivity
+    on_latency:
+      name: On latency
+    off_latency:
+      name: Off latency
+    uart_report_period:
+      name: UART report period
+
+
+switch:
+  - platform: dfrobot_mmwave
+    running:
+      name: Radar enabled
+    led:
+      name: LED               # on = heartbeat blink (factory), off = dark
+    uart_presence_report:
+      name: UART presence report
+    uart_target_report:
+      name: UART target report
+
+button:
+  - platform: dfrobot_mmwave
+    refresh:
+      name: Reread radar settings
+    restart:
+      name: Restart radar
+    factory_reset:
+      name: Factory reset radar
+
+sensor:
+  - platform: dfrobot_mmwave
+    target_count:
+      name: Targets
+    target_1_distance: {name: Target 1 distance}
+    target_1_snr: {name: Target 1 SNR}
+    target_2_distance: {name: Target 2 distance}
+    target_2_snr: {name: Target 2 SNR}
+    target_3_distance: {name: Target 3 distance}
+    target_3_snr: {name: Target 3 SNR}
+    target_4_distance: {name: Target 4 distance}
+    target_4_snr: {name: Target 4 SNR}
+    target_5_distance: {name: Target 5 distance}
+    target_5_snr: {name: Target 5 SNR}
+    target_6_distance: {name: Target 6 distance}
+    target_6_snr: {name: Target 6 SNR}
+    target_7_distance: {name: Target 7 distance}
+    target_7_snr: {name: Target 7 SNR}
+    target_8_distance: {name: Target 8 distance}
+    target_8_snr: {name: Target 8 SNR}
+
+text_sensor:
+  - platform: dfrobot_mmwave
+    software_version:
+      name: Radar firmware
+    hardware_version:
+      name: Radar hardware
+    status:
+      name: Radar status
+    last_error:
+      name: Radar last error

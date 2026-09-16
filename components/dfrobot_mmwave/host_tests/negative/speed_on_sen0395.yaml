@@ -1,0 +1,14 @@
+# expect: 'target_1_speed' is not available on the SEN0395
+packages:
+  base: !include _base.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 115200
+dfrobot_mmwave:
+  model: SEN0395
+sensor:
+  - platform: dfrobot_mmwave
+    target_1_speed:
+      name: x

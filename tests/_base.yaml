@@ -1,0 +1,13 @@
+# Shared by the config-validation tests: build straight from this checkout.
+esphome:
+  name: mmwave-test
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+logger:
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [dfrobot_mmwave]

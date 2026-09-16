@@ -1,0 +1,79 @@
+# SEN0395 with every entity it supports, including all eight target slots; UART at 115200.
+dfrobot_mmwave:
+  id: radar_sen0395
+  model: SEN0395
+  presence_pin: ${presence_pin}
+  target_timeout: 2s
+
+binary_sensor:
+  - platform: dfrobot_mmwave
+    occupancy:
+      name: SEN0395 occupancy
+    out_pin_occupancy:
+      name: SEN0395 occupancy (OUT pin)
+    uart_occupancy:
+      name: SEN0395 occupancy (UART)
+
+number:
+  - platform: dfrobot_mmwave
+    min_range:
+      name: SEN0395 min range
+    max_range:
+      name: SEN0395 max range
+    sensitivity:
+      name: SEN0395 sensitivity
+    on_latency:
+      name: SEN0395 on latency
+    off_latency:
+      name: SEN0395 off latency
+    uart_report_period:
+      name: SEN0395 UART report period
+
+select:
+  - platform: dfrobot_mmwave
+
+switch:
+  - platform: dfrobot_mmwave
+    running:
+      name: SEN0395 enabled
+    led:
+      name: SEN0395 LED
+    uart_presence_report:
+      name: SEN0395 UART presence report
+    uart_target_report:
+      name: SEN0395 UART target report
+
+button:
+  - platform: dfrobot_mmwave
+    refresh:
+      name: SEN0395 re-read settings
+
+sensor:
+  - platform: dfrobot_mmwave
+    target_count:
+      name: SEN0395 targets
+    target_1_distance:
+      name: SEN0395 target 1 distance
+    target_1_snr:
+      name: SEN0395 target 1 SNR
+    target_2_distance:
+      name: SEN0395 target 2 distance
+    target_2_snr:
+      name: SEN0395 target 2 SNR
+    target_8_distance:
+      name: SEN0395 target 8 distance
+    target_8_snr:
+      name: SEN0395 target 8 SNR
+
+text_sensor:
+  - platform: dfrobot_mmwave
+    status:
+      name: SEN0395 status
+
+interval:
+  - interval: 1h
+    then:
+      - dfrobot_mmwave.set_parameter:
+          id: radar_sen0395
+          parameter: uart_report_period
+          value: 0.025

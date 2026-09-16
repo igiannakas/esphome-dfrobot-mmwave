@@ -1,0 +1,14 @@
+# expect: requires 'presence_pin'
+packages:
+  base: !include _base.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+dfrobot_mmwave:
+  model: SEN0609
+binary_sensor:
+  - platform: dfrobot_mmwave
+    out_pin_occupancy:
+      name: x

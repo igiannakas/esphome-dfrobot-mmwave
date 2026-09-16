@@ -1,0 +1,99 @@
+# dfrobot_mmwave hardware test — SEN0610 (Gravity C4001, 12 m) on a XIAO ESP32-C6
+#
+# Radar wiring:  +  -> 3V3   -  -> GND   C/R -> D6 (GPIO16)   D/T -> D7 (GPIO17)
+# No OUT pin on this model; occupancy comes from the UART report. Put the board's I2C/UART
+# selector (if fitted) in the UART position before powering up.
+# Flash:  esphome run examples/bench/bench-sen0610.yaml
+
+substitutions:
+  device_name: radar-test-sen0610
+  friendly_name: "Radar test SEN0610"
+  baud_rate: "9600"
+
+packages:
+  common: !include bench-common.yaml
+
+dfrobot_mmwave:
+  id: radar
+  uart_id: radar_uart
+  model: SEN0610
+
+binary_sensor:
+  - platform: dfrobot_mmwave
+    occupancy:
+      name: Occupancy
+      device_class: occupancy
+    uart_occupancy:
+      name: Occupancy (UART)
+    link_ok:
+      name: Radar link
+
+number:
+  - platform: dfrobot_mmwave
+    min_range:
+      name: Min range
+    max_range:
+      name: Max range
+    trigger_range:
+      name: Trigger range
+    hold_sensitivity:
+      name: Hold sensitivity
+    trigger_sensitivity:
+      name: Trigger sensitivity
+    on_latency:
+      name: On latency
+    off_latency:
+      name: Off latency
+    inhibit_time:
+      name: Inhibit time
+    speed_threshold_factor:   # speed-and-distance mode only
+      name: Speed mode threshold factor
+    uart_report_period:
+      name: UART report period
+
+select:
+  - platform: dfrobot_mmwave
+    work_mode:
+      name: Work mode
+
+switch:
+  - platform: dfrobot_mmwave
+    running:
+      name: Radar enabled
+    led:
+      name: LED               # on = heartbeat blink (factory), off = dark
+    speed_micro_motion:       # speed-and-distance mode only
+      name: Speed mode micro motion
+    uart_presence_report:
+      name: UART presence report
+
+button:
+  - platform: dfrobot_mmwave
+    refresh:
+      name: Reread radar settings
+    restart:
+      name: Restart radar
+    factory_reset:
+      name: Factory reset radar
+
+sensor:
+  - platform: dfrobot_mmwave
+    target_count:
+      name: Targets
+    target_1_distance:
+      name: Target 1 distance
+    target_1_speed:
+      name: Target 1 speed
+    target_1_energy:
+      name: Target 1 energy
+
+text_sensor:
+  - platform: dfrobot_mmwave
+    software_version:
+      name: Radar firmware
+    hardware_version:
+      name: Radar hardware
+    status:
+      name: Radar status
+    last_error:
+      name: Radar last error

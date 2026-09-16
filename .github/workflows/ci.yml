@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-tests:
+    name: Protocol host tests (ASan/UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: components/dfrobot_mmwave/host_tests/run.sh
+
+  esphome-config:
+    name: ESPHome config validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install esphome
+      - name: Secrets for the examples
+        run: |
+          cp examples/secrets.yaml.example examples/secrets.yaml
+          cp examples/secrets.yaml.example examples/bench/secrets.yaml
+      - name: Examples build straight from this checkout
+        run: |
+          for f in examples/bench/bench-*.yaml; do
+            [ "$(basename "$f")" = bench-common.yaml ] && continue
+            esphome config "$f" > /dev/null
+          done
+      - name: Configs the component must reject
+        run: components/dfrobot_mmwave/host_tests/validate_negative.sh
+      - name: Every entity of every model
+        run: |
+          for f in tests/test-*.yaml; do esphome config "$f" > /dev/null; done

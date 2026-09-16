@@ -1,0 +1,376 @@
+# ============================================================
+# PRESENCE RADAR  —  XIAO ESP32-C6 + DFRobot SEN0609 (C4001, 25 m)
+# ============================================================
+
+substitutions:
+  # --- DEVICE -----------------------------------------------
+  device_name: occupancy-sensor
+  friendly_name: "Occupancy Sensor"
+
+  # --- NETWORK  (values in secrets.yaml next to this file) --
+  wifi_ssid: !secret wifi_ssid
+  wifi_password: !secret wifi_password
+
+  # --- RADAR MODEL ------------------------------------------
+  #
+  # SEN0609 = C4001 25 m, with an OUT pin.
+  # SEN0610 = C4001 12 m, no OUT pin: set radar_model and
+  # delete presence_pin from the dfrobot_mmwave block, the
+  # component rejects it on that model.
+  #
+  radar_model: SEN0609
+
+  # --- PINS  (Seeed XIAO ESP32-C6) --------------------------
+  #
+  # Silkscreen names
+  #
+  #   D8   GPIO19   <- C4001 OUT
+  #   D9   GPIO20   <- C4001 TX   (ESP RX)
+  #   D10  GPIO18   -> C4001 RX   (ESP TX)
+  #
+  pin_radar_tx: GPIO18
+  pin_radar_rx: GPIO20
+  pin_radar_out: GPIO19
+
+  # --- SPEED-AND-DISTANCE MODE ------------------------------
+  # Throttling to keep the recorder sane.
+  #
+  target_throttle: 500ms
+
+  # --- DIAGNOSTICS  (WiFi, die temp, uptime) ----------------
+  diag_interval: 60s
+
+# ============================================================
+# EXTERNAL COMPONENTS
+#
+# The dfrobot mmwave espHome external component
+# ============================================================
+
+external_components:
+  - source: github://igiannakas/esphome-dfrobot-mmwave
+    components: [dfrobot_mmwave]
+    refresh: 0s
+
+# ============================================================
+# FIRMWARE
+# ============================================================
+
+esphome:
+  name: ${device_name}
+  friendly_name: "${friendly_name}"
+  on_boot:
+    # Antenna before the radio exists. 700 rather than 800 so
+    # the GPIO outputs — which set up at 800 — have configured
+    # the pins by the time this writes them, and still far
+    # clear of WiFi at 250.
+    - priority: 700
+      then:
+        # Both low: RF switch powered, PCB antenna selected.
+        - output.turn_off: rf_switch_power
+        - output.turn_off: antenna_select
+
+esp32:
+  board: seeed_xiao_esp32c6
+  framework:
+    type: esp-idf
+
+# UART logging off; the log stream reaches the API. INFO keeps
+# the radar's one-per-boot lines (versions, "radar is in
+# presence mode", a periodic-mode notice) and drops the
+# per-line transcript, which is DEBUG/VERBOSE.
+logger:
+  level: INFO
+  baud_rate: 0
+
+# ============================================================
+# CONNECTIVITY
+# ============================================================
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  # No power save: a presence sensor's whole job is latency,
+  # and the node is mains powered.
+  power_save_mode: NONE
+  ssid: "${wifi_ssid}"
+  password: "${wifi_password}"
+  ap:
+    ssid: "${device_name} Fallback"
+    password: "${wifi_password}"
+
+captive_portal:
+
+web_server:
+  port: 80
+  include_internal: true
+
+# ============================================================
+# ANTENNA
+#
+# The module carries both a PCB antenna and a u.FL socket with
+# an RF switch picking between them. This node uses the PCB
+# antenna, so both pins are simply held low:
+#
+#   GPIO3    RF switch power   LOW = powered
+#   GPIO14   antenna select    LOW = internal
+#
+# Powering the switch is the part that matters. Left alone it
+# comes up unpowered and the internal antenna still radiates,
+# just badly. Nothing looks broken but the range is quietly
+# worse than it should be. 
+# ============================================================
+
+output:
+  - platform: gpio
+    id: rf_switch_power
+    pin: GPIO3
+
+  - platform: gpio
+    id: antenna_select
+    pin: GPIO14
+
+# ============================================================
+# RADAR UART   (pins in the PINS block at the top)
+#
+# 9600 is the C4001 factory rate. the config is rejected at 
+# any other rate.
+# ============================================================
+
+uart:
+  id: radar_uart
+  tx_pin: ${pin_radar_tx}
+  rx_pin: ${pin_radar_rx}
+  baud_rate: 9600
+
+# ============================================================
+# RADAR module
+# ============================================================
+
+dfrobot_mmwave:
+  id: radar
+  uart_id: radar_uart
+  model: ${radar_model}
+  presence_pin: ${pin_radar_out}
+
+# ============================================================
+# BINARY SENSORS
+# ============================================================
+
+binary_sensor:
+
+  # ----------------------------------------------------------
+  # OCCUPANCY  —  OUT pin OR UART report to a consolidated 
+  # Occupancy sensor. The two source sensors are the same 
+  # information split out. Disabled by default, enable in HA 
+  # to check the wiring.
+  # ----------------------------------------------------------
+  - platform: dfrobot_mmwave
+    occupancy:
+      name: "Occupancy"
+      device_class: occupancy
+    out_pin_occupancy:
+      name: "Occupancy - OUT Pin"
+      disabled_by_default: true
+      entity_category: diagnostic
+    uart_occupancy:
+      name: "Occupancy - UART"
+      disabled_by_default: true
+      entity_category: diagnostic
+    link_ok:
+      name: "Radar - Link"
+      entity_category: diagnostic
+
+# ============================================================
+# TEXT SENSORS
+#
+# Radar - Status contains the component's lifecycle (probing,
+# reading, applying, running, stopped, link_lost,
+# unsupported_firmware). Radar - Last Error holds the most
+# recent problem. A rejected or clamped setting, a timeout etc.
+# Clears itself on the next clean operation.
+#
+# ============================================================
+
+text_sensor:
+  - platform: dfrobot_mmwave
+    status:
+      name: "Radar - Status"
+    last_error:
+      name: "Radar - Last Error"
+    software_version:
+      name: "Radar - Firmware"
+      disabled_by_default: true
+      internal: true
+    hardware_version:
+      name: "Radar - Hardware"
+      disabled_by_default: true
+      internal: true
+
+# ============================================================
+# NUMBERS  —  radar settings, live from HA
+#
+# Every value is read back from the radar after a change and
+# the entity shows what the radar kept, so a clamped request
+# (trigger range below 2.4 m, off latency below 2 s, inhibit
+# above 60 s) snaps back to the firmware's limit and names
+# itself in Radar - Last Error. Changes made within a second of
+# each other go to the radar as one write.
+#
+#   Range - Min / Max     detection window, m
+#   Range - Trigger       distance within which a new target
+#                         triggers; should be <= max - min,
+#                         the firmware does not enforce it
+#   Sensitivity - Hold    keeping a target, 0..9
+#   Sensitivity - Trigger acquiring one, 0..9 (2..6 suggested)
+#   Latency - On / Off    see OCCUPANCY at the top
+#   Inhibit Time          dead time after each OUT change
+#   UART - Report Period  keep-alive cadence of the UART
+#                         source, and therefore how fast a
+#                         dead stream is noticed
+#
+# Speed Mode - Threshold Factor exists only in the other app;
+# it shows unavailable while in presence mode.
+# ============================================================
+
+number:
+  - platform: dfrobot_mmwave
+    min_range:
+      name: "Range - Min"
+    max_range:
+      name: "Range - Max"
+    trigger_range:
+      name: "Range - Trigger"
+    hold_sensitivity:
+      name: "Sensitivity - Hold"
+    trigger_sensitivity:
+      name: "Sensitivity - Trigger"
+    on_latency:
+      name: "Latency - On"
+    off_latency:
+      name: "Latency - Off"
+    inhibit_time:
+      name: "Inhibit Time"
+    uart_report_period:
+      name: "UART - Report Period"
+    speed_threshold_factor:
+      name: "Speed Mode - Threshold Factor"
+      disabled_by_default: true
+      internal: true
+
+# ============================================================
+# SELECTS
+# ============================================================
+
+select:
+  - platform: dfrobot_mmwave
+    # presence | speed_and_distance — see the block at the top
+    work_mode:
+      name: "Work Mode"
+      disabled_by_default: true
+      internal: true
+
+# ============================================================
+# SWITCHES
+#
+#   Radar - Enabled          sensorStart / sensorStop. Not
+#                            persisted by the radar; on if the
+#                            radar is running at boot.
+#   Radar - LED              on = the factory heartbeat blink
+#   UART - Presence Report   the UART occupancy source. Off =
+#                            OUT pin only.
+# ============================================================
+
+switch:
+  - platform: dfrobot_mmwave
+    running:
+      name: "Radar - Enabled"
+    led:
+      name: "Radar - LED"
+    uart_presence_report:
+      name: "UART - Presence Report"
+    speed_micro_motion:
+      name: "Speed Mode - Micro Motion"
+      disabled_by_default: true
+      internal: true
+
+# ============================================================
+# BUTTONS
+#
+#   Reread Settings   ask the radar for every setting again
+#   Restart Radar     resetSystem; the node re-identifies it
+#   Factory Reset     resetCfg + save; every setting back to
+#                     the firmware defaults, then read back
+# ============================================================
+
+button:
+  - platform: dfrobot_mmwave
+    refresh:
+      name: "Radar - Reread Settings"
+      entity_category: diagnostic
+    restart:
+      name: "Radar - Restart"
+      entity_category: diagnostic
+    factory_reset:
+      name: "Radar - Factory Reset"
+      entity_category: diagnostic
+
+  - platform: restart
+    name: "ESP - Restart"
+    entity_category: diagnostic
+
+# ============================================================
+# SENSORS
+# ============================================================
+
+sensor:
+  # ----------------------------------------------------------
+  # TARGETS  —  speed-and-distance mode only
+  #
+  # Unavailable in presence mode. ~10 Hz in speed mode, hence
+  # the throttle; disabled by default so the recorder never
+  # sees them unless asked.
+  # ----------------------------------------------------------
+  - platform: dfrobot_mmwave
+    target_count:
+      name: "Target - Count"
+      disabled_by_default: true
+      internal: true
+    target_1_distance:
+      name: "Target - Distance"
+      disabled_by_default: true
+      internal: true
+      filters:
+        - throttle_with_priority: ${target_throttle}
+    target_1_speed:
+      name: "Target - Speed"
+      disabled_by_default: true
+      internal: true
+      filters:
+        - throttle_with_priority: ${target_throttle}
+    target_1_energy:
+      name: "Target - Energy"
+      disabled_by_default: true
+      internal: true
+      filters:
+        - throttle_with_priority: ${target_throttle}
+
+  # ----------------------------------------------------------
+  # DIAGNOSTICS
+  # ----------------------------------------------------------
+  - platform: internal_temperature
+    name: "ESP - Temperature"
+    entity_category: diagnostic
+    update_interval: ${diag_interval}
+
+  - platform: wifi_signal
+    name: "ESP - WiFi Signal"
+    entity_category: diagnostic
+    update_interval: ${diag_interval}
+
+  - platform: uptime
+    name: "ESP - Uptime"
+    entity_category: diagnostic
+    update_interval: ${diag_interval}

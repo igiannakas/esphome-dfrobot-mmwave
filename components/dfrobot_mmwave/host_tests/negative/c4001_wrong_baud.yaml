@@ -1,0 +1,10 @@
+# expect: requires baud rate 9600
+packages:
+  base: !include _base.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 115200
+dfrobot_mmwave:
+  model: SEN0609

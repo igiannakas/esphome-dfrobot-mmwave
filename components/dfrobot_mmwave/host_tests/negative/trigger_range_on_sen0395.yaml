@@ -1,0 +1,14 @@
+# expect: 'trigger_range' is not available on the SEN0395
+packages:
+  base: !include _base.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 115200
+dfrobot_mmwave:
+  model: SEN0395
+number:
+  - platform: dfrobot_mmwave
+    trigger_range:
+      name: x

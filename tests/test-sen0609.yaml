@@ -1,0 +1,11 @@
+# Every entity the sen0609 supports; validated by CI with `esphome config`.
+substitutions:
+  presence_pin: GPIO21
+packages:
+  base: !include _base.yaml
+  radar: !include common-sen0609.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600

@@ -1,0 +1,14 @@
+# expect: 'sensitivity' is not available on the SEN0610
+packages:
+  base: !include _base.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+dfrobot_mmwave:
+  model: SEN0610
+number:
+  - platform: dfrobot_mmwave
+    sensitivity:
+      name: x

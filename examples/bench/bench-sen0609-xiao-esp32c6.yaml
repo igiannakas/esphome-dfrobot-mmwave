@@ -1,0 +1,218 @@
+# DFRobot SEN0609 (C4001, 25 m) on a Seeed XIAO ESP32-C6 — single-file bench config
+# For the dfrobot_mmwave branch at change note 5 (commit a50ecd681b or later): hub block is
+# uart_id / model / presence_pin, occupancy = OUT pin OR UART report, LED is a switch, UART
+# reports are always on-change, speed_* keys for the speed-and-distance-mode-only settings.
+# Every entity has a default name, so `key: {}` would do; names are spelled out here anyway.
+#
+# Wiring:
+#   XIAO D10 (GPIO18) = ESP TX  -> C4001 RX
+#   XIAO D9  (GPIO20) = ESP RX  <- C4001 TX
+#   XIAO D8  (GPIO19)           <- C4001 OUT
+#   XIAO 3V3 -> C4001 VIN   (rated 3.3/5 V; 3V3 keeps TX/OUT at C6-safe 3.3 V)
+#   XIAO GND -> C4001 GND
+#
+# Flash:  esphome run bench-sen0609-xiao-esp32c6.yaml
+# Logs:   esphome logs bench-sen0609-xiao-esp32c6.yaml | tee logs/sen0609-$(date +%Y%m%d-%H%M).log
+
+esphome:
+  name: radar-sen0609
+  friendly_name: "Radar SEN0609"
+  on_boot:
+    # Antenna before the radio exists. 700 rather than 800 so the GPIO outputs
+    # (set up at 800) have configured the pins by the time this writes them,
+    # and still well clear of WiFi at 250.
+    - priority: 700
+      then:
+        # Both low: RF switch powered, PCB antenna selected.
+        - output.turn_off: rf_switch_power
+        - output.turn_off: antenna_select
+
+esp32:
+  board: seeed_xiao_esp32c6
+  variant: esp32c6
+  framework:
+    type: esp-idf
+
+# Logs go over the USB serial/JTAG port; the radar UART pins stay free.
+# dfrobot_mmwave at VERBOSE prints every TX/RX line and report sentence (the transcript).
+logger:
+  level: VERBOSE
+  logs:
+    dfrobot_mmwave: VERBOSE
+    binary_sensor: DEBUG
+    sensor: DEBUG
+    text_sensor: DEBUG
+    number: DEBUG
+    select: DEBUG
+    switch: DEBUG
+    button: DEBUG
+    debug: DEBUG
+    api: INFO
+    api.connection: INFO
+    api.service: INFO
+    wifi: INFO
+    mdns: INFO
+    ota: INFO
+    web_server: INFO
+    scheduler: INFO
+    component: INFO
+    esp-idf: INFO
+    uart: INFO
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: radar-sen0609-setup
+    password: !secret wifi_password
+
+captive_portal:
+
+# XIAO ESP32-C6 antenna: PCB antenna + u.FL socket behind an RF switch.
+#   GPIO3   RF switch power   LOW = powered
+#   GPIO14  antenna select    LOW = internal (PCB) antenna
+# The Arduino core does this for you; esp-idf does not, so this file has to.
+output:
+  - platform: gpio
+    id: rf_switch_power
+    pin: GPIO3
+  - platform: gpio
+    id: antenna_select
+    pin: GPIO14
+
+# Bench UI without Home Assistant: http://radar-sen0609.local
+web_server:
+  port: 80
+
+external_components:
+  - source: github://igiannakas/esphome-dfrobot-mmwave
+    components: [dfrobot_mmwave]
+    refresh: 0s   # always pull the latest commit of the branch on each build
+
+uart:
+  id: radar_uart
+  tx_pin: GPIO18   # D10 -> C4001 RX
+  rx_pin: GPIO20   # D9  <- C4001 TX
+  baud_rate: 9600
+
+# Occupancy = OUT pin OR UART report, whichever is live. Omit presence_pin if OUT is not wired.
+dfrobot_mmwave:
+  id: radar
+  uart_id: radar_uart
+  model: SEN0609
+  presence_pin: GPIO19   # D8 <- C4001 OUT (component applies INPUT_PULLDOWN)
+
+binary_sensor:
+  - platform: dfrobot_mmwave
+    occupancy:
+      name: Occupancy
+      device_class: occupancy
+    uart_occupancy:
+      name: Occupancy (UART)
+    out_pin_occupancy:
+      name: Occupancy (OUT pin)
+    link_ok:
+      name: Radar link
+
+number:
+  - platform: dfrobot_mmwave
+    min_range:
+      name: Min range
+    max_range:
+      name: Max range
+    trigger_range:
+      name: Trigger range
+    hold_sensitivity:
+      name: Hold sensitivity
+    trigger_sensitivity:
+      name: Trigger sensitivity
+    on_latency:
+      name: On latency
+    off_latency:
+      name: Off latency
+    inhibit_time:
+      name: Inhibit time
+    uart_report_period:
+      name: UART report period
+    # speed-and-distance mode only; unavailable while in presence mode
+    speed_threshold_factor:
+      name: Speed mode threshold factor
+
+select:
+  - platform: dfrobot_mmwave
+    work_mode:
+      name: Work mode
+
+switch:
+  - platform: dfrobot_mmwave
+    running:
+      name: Radar enabled
+    led:
+      name: LED            # on = factory heartbeat blink, off = LED off
+    uart_presence_report:
+      name: UART presence report
+    # speed-and-distance mode only; unavailable while in presence mode
+    speed_micro_motion:
+      name: Speed mode micro motion
+
+button:
+  - platform: dfrobot_mmwave
+    refresh:
+      name: Reread radar settings
+    restart:
+      name: Restart radar
+    factory_reset:
+      name: Factory reset radar
+  - platform: restart
+    name: Restart ESP
+    entity_category: diagnostic
+
+sensor:
+  - platform: dfrobot_mmwave
+    # speed-and-distance mode only on the C4001 ($DFDMD at ~10 Hz); unavailable in presence mode
+    target_count:
+      name: Targets
+    target_1_distance:
+      name: Target 1 distance
+    target_1_speed:
+      name: Target 1 speed
+    target_1_energy:
+      name: Target 1 energy
+  # heap / loop time for the soak test
+  - platform: debug
+    free:
+      name: Heap free
+      entity_category: diagnostic
+    loop_time:
+      name: Loop time
+      entity_category: diagnostic
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic
+    update_interval: 60s
+  - platform: wifi_signal
+    name: RSSI
+    entity_category: diagnostic
+    update_interval: 60s
+
+debug:
+  update_interval: 30s
+
+text_sensor:
+  - platform: dfrobot_mmwave
+    software_version:
+      name: Radar firmware
+    hardware_version:
+      name: Radar hardware
+    status:
+      name: Radar status
+    last_error:
+      name: Radar last error
+  - platform: version
+    name: ESPHome version
+    entity_category: diagnostic

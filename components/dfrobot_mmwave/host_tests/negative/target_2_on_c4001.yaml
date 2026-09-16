@@ -1,0 +1,14 @@
+# expect: 'target_2_distance' is not available on the SEN0609
+packages:
+  base: !include _base.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+dfrobot_mmwave:
+  model: SEN0609
+sensor:
+  - platform: dfrobot_mmwave
+    target_2_distance:
+      name: x

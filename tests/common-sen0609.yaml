@@ -1,0 +1,114 @@
+# SEN0609 (C4001 25 m) with every entity it supports; the UART package runs at 9600.
+dfrobot_mmwave:
+  id: radar
+  model: SEN0609
+  presence_pin:
+    number: ${presence_pin}
+    inverted: false
+  target_timeout: 2s
+
+binary_sensor:
+  - platform: dfrobot_mmwave
+    occupancy:
+      name: Occupancy
+    uart_occupancy:
+      name: Occupancy (UART)
+    out_pin_occupancy:
+      name: Occupancy (OUT pin)
+    link_ok:
+      name: Radar link
+
+number:
+  - platform: dfrobot_mmwave
+    min_range:
+      name: Min range
+    max_range:
+      name: Max range
+    trigger_range:
+      name: Trigger range
+    hold_sensitivity:
+      name: Hold sensitivity
+    trigger_sensitivity:
+      name: Trigger sensitivity
+    on_latency:
+      name: On latency
+    off_latency:
+      name: Off latency
+    inhibit_time:
+      name: Inhibit time
+    speed_threshold_factor:
+      name: Threshold factor
+    uart_report_period:
+      name: UART report period
+
+select:
+  - platform: dfrobot_mmwave
+    work_mode:
+      name: Work mode
+
+switch:
+  - platform: dfrobot_mmwave
+    running:
+      name: Radar enabled
+    led: {}
+    speed_micro_motion: {}
+    uart_presence_report:
+      name: UART presence report
+
+button:
+  - platform: dfrobot_mmwave
+    refresh:
+      name: Re-read settings
+    restart:
+      name: Restart radar
+    factory_reset:
+      name: Factory reset
+
+sensor:
+  - platform: dfrobot_mmwave
+    target_count:
+      name: Targets
+    target_1_distance:
+      name: Target 1 distance
+    target_1_speed:
+      name: Target 1 speed
+    target_1_energy:
+      name: Target 1 energy
+
+text_sensor:
+  - platform: dfrobot_mmwave
+    software_version:
+      name: Radar firmware
+    hardware_version:
+      name: Radar hardware
+    status:
+      name: Radar status
+    last_error:
+      name: Radar last error
+
+esphome:
+  on_boot:
+    then:
+      - dfrobot_mmwave.refresh: radar
+      - dfrobot_mmwave.set_parameter:
+          id: radar
+          parameter: max_range
+          value: 6.5
+      - dfrobot_mmwave.set_parameter:
+          id: radar
+          parameter: off_latency
+          value: !lambda "return 20.0f;"
+      - dfrobot_mmwave.set_parameter:
+          id: radar
+          parameter: uart_report_period
+          value: 0.2
+      - dfrobot_mmwave.set_parameter:
+          id: radar
+          parameter: work_mode
+          value: 1
+      - dfrobot_mmwave.set_parameter:
+          id: radar
+          parameter: led
+          value: 0
+      - dfrobot_mmwave.restart: radar
+      - dfrobot_mmwave.factory_reset: radar

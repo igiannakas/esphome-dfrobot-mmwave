@@ -1,0 +1,18 @@
+# expect: inhibit_time must be between 0.3 and 60 on the SEN0609, got 0.1
+packages:
+  base: !include _base.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+dfrobot_mmwave:
+  id: radar
+  model: SEN0609
+interval:
+  - interval: 1h
+    then:
+      - dfrobot_mmwave.set_parameter:
+          id: radar
+          parameter: inhibit_time
+          value: 0.1

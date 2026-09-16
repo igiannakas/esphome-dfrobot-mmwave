@@ -1,0 +1,12 @@
+esphome:
+  name: mmwave-negative
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+logger:
+external_components:
+  - source:
+      type: local
+      path: ../../..
+    components: [dfrobot_mmwave]

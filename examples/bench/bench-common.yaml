@@ -1,0 +1,120 @@
+# ------------------------------------------------------------------------------------------
+# dfrobot_mmwave hardware test — common package for the XIAO ESP32-C6
+#
+# Included by bench-sen0395.yaml / bench-sen0609.yaml / bench-sen0610.yaml.
+# Each of those sets: device_name, friendly_name, baud_rate, and the dfrobot_mmwave: block.
+#
+# Wiring (same harness for all three radars; only the radar side changes):
+#   XIAO D6  = GPIO16 = ESP TX  -> radar RX  (SEN0395 "RX", SEN0609 "RX", SEN0610 "C/R")
+#   XIAO D7  = GPIO17 = ESP RX  <- radar TX  (SEN0395 "TX", SEN0609 "TX", SEN0610 "D/T")
+#   XIAO D3  = GPIO21 = presence in <- radar OUT / IO2   (not used on SEN0610: no OUT pin)
+#   XIAO GND          -> radar GND
+#   XIAO 5V  (USB VBUS) -> SEN0395 V   (needs 3.6-5.5 V; its logic pins are 3.3 V)
+#   XIAO 3V3          -> SEN0609 VIN / SEN0610 +   (rated 3.3/5 V; 3V3 keeps OUT/TX at 3.3 V)
+# Never put 5 V on a C6 GPIO.
+# ------------------------------------------------------------------------------------------
+
+substitutions:
+  uart_tx_pin: GPIO16   # D6
+  uart_rx_pin: GPIO17   # D7
+  presence_pin: GPIO21  # D3
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: seeed_xiao_esp32c6
+  variant: esp32c6
+  framework:
+    type: esp-idf
+
+# Logs go out over the USB serial/JTAG port, so GPIO16/17 stay free for the radar.
+# `dfrobot_mmwave: VERBOSE` prints every TX/RX line and every report sentence — that is the transcript.
+logger:
+  level: VERBOSE            # global must be >= any per-tag level; the noisy tags are demoted below
+  logs:
+    dfrobot_mmwave: VERBOSE # every TX/RX line and report sentence = the transcript
+    binary_sensor: DEBUG
+    sensor: DEBUG
+    text_sensor: DEBUG
+    number: DEBUG
+    select: DEBUG
+    switch: DEBUG
+    button: DEBUG
+    debug: DEBUG
+    api: INFO
+    api.connection: INFO
+    api.service: INFO
+    wifi: INFO
+    mdns: INFO
+    ota: INFO
+    web_server: INFO
+    scheduler: INFO
+    component: INFO
+    esp-idf: INFO
+    uart: INFO
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: ${device_name}-setup
+    password: !secret wifi_password
+
+captive_portal:
+
+# Bench UI without Home Assistant: http://<device_name>.local
+web_server:
+  port: 80
+
+# Built straight from this checkout. A user config would use:
+#   source: github://igiannakas/esphome-dfrobot-mmwave
+external_components:
+  - source:
+      type: local
+      path: ../../components
+    components: [dfrobot_mmwave]
+
+uart:
+  id: radar_uart
+  tx_pin: ${uart_tx_pin}
+  rx_pin: ${uart_rx_pin}
+  baud_rate: ${baud_rate}
+  rx_buffer_size: 512   # eight $JYRPO lines per cycle at 115200 fit comfortably
+
+# Heap and loop-time for the soak test (stage 8)
+debug:
+  update_interval: 30s
+
+sensor:
+  - platform: debug
+    free:
+      name: Heap free
+      entity_category: diagnostic
+    loop_time:
+      name: Loop time
+      entity_category: diagnostic
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic
+    update_interval: 60s
+  - platform: wifi_signal
+    name: RSSI
+    entity_category: diagnostic
+    update_interval: 60s
+
+button:
+  - platform: restart
+    name: Restart ESP
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: version
+    name: ESPHome version
+    entity_category: diagnostic

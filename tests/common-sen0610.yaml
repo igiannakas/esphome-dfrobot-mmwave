@@ -1,0 +1,26 @@
+# SEN0610 (C4001 12 m, no OUT pin): occupancy comes from the UART reports only.
+
+dfrobot_mmwave:
+  id: radar_sen0610
+  model: sen0610
+
+number:
+  - platform: dfrobot_mmwave
+    max_range:
+      name: SEN0610 max range
+    trigger_range:
+      name: SEN0610 trigger range
+
+binary_sensor:
+  - platform: dfrobot_mmwave
+    occupancy:
+      name: SEN0610 occupancy
+
+switch:
+  - platform: dfrobot_mmwave
+    speed_micro_motion: {}
+
+sensor:
+  - platform: dfrobot_mmwave
+    target_1_distance:
+      name: SEN0610 target distance

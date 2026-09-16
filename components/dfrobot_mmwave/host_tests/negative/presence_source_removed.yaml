@@ -1,0 +1,12 @@
+# expect: [presence_source] is an invalid option
+packages:
+  base: !include _base.yaml
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+dfrobot_mmwave:
+  model: SEN0609
+  presence_pin: GPIO19
+  presence_source: pin
