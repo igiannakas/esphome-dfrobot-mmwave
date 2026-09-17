@@ -30,6 +30,7 @@
 #endif
 
 #include "mmwave_engine.h"
+#include "mmwave_publish_filter.h"
 
 namespace esphome::dfrobot_mmwave {
 
@@ -37,25 +38,6 @@ enum class ButtonAction : uint8_t {
   BUTTON_ACTION_REFRESH,
   BUTTON_ACTION_RESTART,
   BUTTON_ACTION_FACTORY_RESET,
-};
-
-/// Publishes a float only when it changes (NaN == NaN for this purpose).
-struct FloatDedup {
-  bool next(float v) {
-    bool is_nan = std::isnan(v);
-    if (this->has_ && (is_nan ? this->last_nan_ : (!this->last_nan_ && v == this->last_))) {
-      return false;
-    }
-    this->has_ = true;
-    this->last_nan_ = is_nan;
-    this->last_ = v;
-    return true;
-  }
-
- protected:
-  float last_{0};
-  bool has_{false};
-  bool last_nan_{false};
 };
 
 class DfrobotMmwave final : public Component, public uart::UARTDevice, public protocol::EngineHost {
@@ -81,13 +63,22 @@ class DfrobotMmwave final : public Component, public uart::UARTDevice, public pr
 #endif
 
  public:
-  explicit DfrobotMmwave(protocol::Model model) { this->cfg_.model = model; }
+  // The engine is configured from the start, so a request made before setup() (an early on_boot action) is
+  // validated for the right model and kept until the radar has been read, instead of reaching a null host.
+  explicit DfrobotMmwave(protocol::Model model) {
+    this->cfg_.model = model;
+    this->engine_.configure(this->cfg_, this);
+  }
 
   void set_presence_pin(GPIOPin *pin) {
     this->presence_pin_ = pin;
     this->cfg_.has_pin = pin != nullptr;
+    this->engine_.configure(this->cfg_, this);
   }
-  void set_target_timeout(uint32_t ms) { this->cfg_.target_timeout_ms = ms; }
+  void set_target_timeout(uint32_t ms) {
+    this->cfg_.target_timeout_ms = ms;
+    this->engine_.configure(this->cfg_, this);
+  }
 
 #ifdef USE_SENSOR
   void set_target_distance_sensor(uint8_t slot, sensor::Sensor *s) {
@@ -154,11 +145,11 @@ class DfrobotMmwave final : public Component, public uart::UARTDevice, public pr
 #ifdef USE_SENSOR
   std::array<sensor::Sensor *, protocol::MAX_TARGETS> target_distance_sensors_{};
   std::array<sensor::Sensor *, protocol::MAX_TARGETS> target_snr_sensors_{};
-  std::array<FloatDedup, protocol::MAX_TARGETS> target_distance_dedup_{};
-  std::array<FloatDedup, protocol::MAX_TARGETS> target_snr_dedup_{};
-  FloatDedup target_count_dedup_{};
-  FloatDedup target_speed_dedup_{};
-  FloatDedup target_energy_dedup_{};
+  std::array<protocol::NanRepeatFilter, protocol::MAX_TARGETS> target_distance_nan_filter_{};
+  std::array<protocol::NanRepeatFilter, protocol::MAX_TARGETS> target_snr_nan_filter_{};
+  protocol::NanRepeatFilter target_count_nan_filter_{};
+  protocol::NanRepeatFilter target_speed_nan_filter_{};
+  protocol::NanRepeatFilter target_energy_nan_filter_{};
 #endif
 };
 

@@ -1454,6 +1454,271 @@ TEST(uart_source_drop_is_logged_with_what_is_left) {
   }
 }
 
+// --- review 3 --------------------------------------------------------------------------------------------
+
+TEST(unconfigured_engine_ignores_requests) {
+  // the hub used to configure its engine only in setup(); an earlier request reached a null host
+  Engine e;
+  CHECK(!e.set_desired(P::PARAM_ID_LATENCY_OFF, 0.5f, 0));
+  e.request_refresh();
+  e.request_restart();
+  e.request_factory_reset();
+  e.request_running(true);
+}
+
+TEST(request_before_begin_is_applied_after_the_boot_read) {
+  Sim s(Model::MODEL_SEN0395, nullptr, [](Engine &e) { CHECK(e.set_desired(P::PARAM_ID_LATENCY_OFF, 0.5f, 0)); });
+  CHECK(s.booted());
+  CHECK(s.idle());
+  CHECK(s.radar.count("setLatency 0.025 0.5") == 1);
+  CHECK_NEAR(s.host.val(P::PARAM_ID_LATENCY_OFF), 0.5, 1e-4);
+  CHECK_STR(s.host.last_error, "");
+  Sim c(Model::MODEL_SEN0609, nullptr, [](Engine &e) { CHECK(e.set_desired(P::PARAM_ID_LATENCY_OFF, 30.0f, 0)); });
+  CHECK(c.booted());
+  CHECK(c.idle());
+  CHECK_NEAR(c.host.val(P::PARAM_ID_LATENCY_OFF), 30, 1e-4);
+}
+
+TEST(rejected_mode_switch_restarts_the_old_app) {
+  {
+    Sim s(Model::MODEL_SEN0609, [](EngineConfig &, FakeRadar &r) {
+      r.use_app(1);
+      r.sentence_period_ms = 100;
+    });
+    CHECK(s.booted());
+    CHECK(s.engine->work_mode() == WorkMode::WORK_MODE_SPEED);
+    s.radar.reject_set_prefix = "setRunApp";
+    s.engine->set_desired(P::PARAM_ID_WORK_MODE, 0, s.t);
+    CHECK(s.idle());
+    s.run(5000);
+    CHECK(s.radar.running);
+    CHECK(s.radar.run_app == 1);
+    CHECK(s.engine->work_mode() == WorkMode::WORK_MODE_SPEED);
+    CHECK_NEAR(s.host.val(P::PARAM_ID_WORK_MODE), 1, 1e-6);
+    CHECK_CONTAINS(s.host.last_error, "work_mode: radar rejected 'setRunApp 0'");
+    CHECK(s.host.status == Status::STATUS_RUNNING);
+    CHECK(s.host.running);
+    CHECK(s.host.uart_state != Presence::PRESENCE_UNKNOWN);
+  }
+  {
+    Sim s(Model::MODEL_SEN0609);
+    CHECK(s.booted());
+    s.radar.reject_set_prefix = "setRunApp";
+    s.engine->set_desired(P::PARAM_ID_WORK_MODE, 1, s.t);
+    CHECK(s.idle());
+    s.run(5000);
+    CHECK(s.radar.running);
+    CHECK(s.radar.run_app == 0);
+    CHECK(s.engine->work_mode() == WorkMode::WORK_MODE_PRESENCE);
+    CHECK_NEAR(s.host.val(P::PARAM_ID_WORK_MODE), 0, 1e-6);
+    CHECK_CONTAINS(s.host.last_error, "work_mode: radar rejected 'setRunApp 1'");
+    CHECK(s.host.status == Status::STATUS_RUNNING);
+    CHECK(s.host.uart_state != Presence::PRESENCE_UNKNOWN);
+  }
+}
+
+TEST(malformed_response_is_asked_again) {
+  Sim s(Model::MODEL_SEN0609, [](EngineConfig &, FakeRadar &r) {
+    r.scripted["getRange"].push_back({"Response 0 garbage 10", "Done"});
+  });
+  CHECK(s.booted());
+  CHECK(s.host.logged("unparseable Response to 'getRange'"));
+  CHECK(s.radar.count("getRange") >= 2);
+  CHECK_NEAR(s.host.val(P::PARAM_ID_RANGE_MIN), 0.6, 1e-4);
+  CHECK_NEAR(s.host.val(P::PARAM_ID_RANGE_MAX), 6, 1e-4);
+  CHECK_STR(s.host.last_error, "");
+}
+
+TEST(malformed_probe_does_not_mark_the_setting_unsupported) {
+  Sim s(Model::MODEL_SEN0609, [](EngineConfig &, FakeRadar &r) {
+    r.scripted["getLedMode 1"].push_back({"Response 1 x", "Done"});
+  });
+  CHECK(s.booted());
+  CHECK(s.host.logged("unparseable Response to 'getLedMode 1'"));
+  CHECK(s.engine->param_available(P::PARAM_ID_LED));
+  CHECK(s.host.has(P::PARAM_ID_LED) && s.host.val(P::PARAM_ID_LED) == 1);
+}
+
+TEST(malformed_read_back_twice_fails_the_read) {
+  Sim s(Model::MODEL_SEN0609);
+  CHECK(s.booted());
+  s.radar.scripted["getRange"].push_back({"Response 0.6 4.5?", "Done"});
+  s.radar.scripted["getRange"].push_back({"Response 0.6 4.5?", "Done"});
+  s.engine->set_desired(P::PARAM_ID_RANGE_MAX, 4.5f, s.t);
+  CHECK(s.idle());
+  CHECK(!s.host.logged("radar reports 0.6"));
+  CHECK_CONTAINS(s.host.last_error, "unparseable");
+  CHECK(s.radar.running);
+}
+
+TEST(link_is_monitored_with_uart_reports_off) {
+  {
+    Sim s(Model::MODEL_SEN0609);
+    CHECK(s.booted());
+    s.engine->set_desired(P::PARAM_ID_UART_PRESENCE_EN, 0, s.t);
+    CHECK(s.idle());
+    int pings = s.radar.count("getSWV");
+    s.run(125000);  // healthy but silent: pinged, never declared lost
+    CHECK(s.radar.count("getSWV") >= pings + 3);
+    CHECK(s.host.link_ok);
+    for (Status st : s.host.statuses)
+      CHECK(st != Status::STATUS_LINK_LOST);
+    CHECK(s.radar.count("sensorStop") == 1);  // only the transaction's own stop
+    s.radar.responsive = false;               // unplugged
+    s.run(70000);
+    CHECK(!s.host.link_ok);
+    CHECK(s.host.status == Status::STATUS_LINK_LOST);
+  }
+  {
+    Sim s(Model::MODEL_SEN0609);
+    CHECK(s.booted());
+    s.engine->request_running(false);
+    CHECK(s.idle());
+    s.radar.responsive = false;
+    s.run(70000);
+    CHECK(!s.host.link_ok);
+    CHECK(s.host.status == Status::STATUS_LINK_LOST);
+  }
+}
+
+TEST(bad_dfdmd_count_does_not_keep_old_target_data) {
+  Sim s(Model::MODEL_SEN0609, [](EngineConfig &, FakeRadar &r) {
+    r.use_app(1);
+    r.sentence_period_ms = 100;
+  });
+  CHECK(s.booted());
+  s.radar.presence = true;
+  s.run(500);
+  CHECK(!s.host.frames.empty() && s.host.frames.back().count == 1);
+  s.radar.emit_sentences = false;
+  size_t before = s.host.frames.size();
+  for (int i = 0; i < 50; i++) {
+    s.radar.send_line("$DFDMD,2,1,1.817,0.129,15304, , *");
+    s.run(100);
+  }
+  bool cleared = false;
+  for (size_t i = before; i < s.host.frames.size(); i++)
+    cleared = cleared || (s.host.frames[i].count == 0 && std::isnan(s.host.frames[i].distance[0]));
+  CHECK(cleared);
+}
+
+// --- review 4 --------------------------------------------------------------------------------------------
+
+TEST(ignored_mode_switch_is_detected) {
+  {
+    // speed -> presence, setRunApp lost: the radar stays stopped in the speed app
+    Sim s(Model::MODEL_SEN0609, [](EngineConfig &, FakeRadar &r) {
+      r.use_app(1);
+      r.sentence_period_ms = 100;
+    });
+    CHECK(s.booted());
+    s.radar.scripted["setRunApp 0"].push_back({});
+    s.engine->set_desired(P::PARAM_ID_WORK_MODE, 0, s.t);
+    CHECK(s.idle());
+    s.run(5000);
+    CHECK(s.radar.running);
+    CHECK(s.radar.run_app == 1);
+    CHECK(s.engine->work_mode() == WorkMode::WORK_MODE_SPEED);
+    CHECK_NEAR(s.host.val(P::PARAM_ID_WORK_MODE), 1, 1e-6);
+    CHECK_CONTAINS(s.host.last_error, "work_mode: requested presence, radar reports speed_and_distance");
+    CHECK(s.host.status == Status::STATUS_RUNNING);
+  }
+  {
+    // presence (reports off) -> speed, setRunApp lost: the radar stays stopped in the silent presence app
+    Sim s(Model::MODEL_SEN0609);
+    CHECK(s.booted());
+    s.engine->set_desired(P::PARAM_ID_UART_PRESENCE_EN, 0, s.t);
+    CHECK(s.idle());
+    s.radar.scripted["setRunApp 1"].push_back({});
+    s.engine->set_desired(P::PARAM_ID_WORK_MODE, 1, s.t);
+    CHECK(s.idle());
+    s.run(5000);
+    CHECK(s.radar.running);
+    CHECK(s.radar.run_app == 0);
+    CHECK_NEAR(s.host.val(P::PARAM_ID_WORK_MODE), 0, 1e-6);
+    CHECK_CONTAINS(s.host.last_error, "work_mode: requested speed_and_distance, radar reports presence");
+    CHECK(s.host.status == Status::STATUS_RUNNING);
+  }
+  {
+    // a switch that works into the silent presence app still ends clean, with the radar running
+    Sim s(Model::MODEL_SEN0609, [](EngineConfig &, FakeRadar &r) {
+      r.use_app(1);
+      r.sentence_period_ms = 100;
+    });
+    CHECK(s.booted());
+    s.radar.uart1_en = 0;  // the presence app will print nothing
+    s.engine->set_desired(P::PARAM_ID_WORK_MODE, 0, s.t);
+    CHECK(s.idle());
+    s.run(5000);
+    CHECK(s.radar.running);
+    CHECK(s.radar.run_app == 0);
+    CHECK_NEAR(s.host.val(P::PARAM_ID_WORK_MODE), 0, 1e-6);
+    CHECK_STR(s.host.last_error, "");
+    CHECK(s.host.status == Status::STATUS_RUNNING);
+  }
+}
+
+TEST(unsupported_firmware_clears_after_a_good_read) {
+  Sim s(Model::MODEL_SEN0609, [](EngineConfig &, FakeRadar &r) {
+    r.scripted["getRange"].push_back({"Error"});
+    r.scripted["getRange"].push_back({"Error"});
+  });
+  CHECK(s.booted());
+  CHECK(s.host.status == Status::STATUS_UNSUPPORTED_FIRMWARE);
+  CHECK(!s.engine->set_desired(P::PARAM_ID_LATENCY_OFF, 30, s.t));
+  s.radar.responsive = false;  // link lost ...
+  s.radar.emit_sentences = false;
+  s.run(60000);
+  CHECK(s.host.status == Status::STATUS_LINK_LOST);
+  s.radar.responsive = true;  // ... and back, now answering getRange
+  s.radar.emit_sentences = true;
+  CHECK(s.run_until([&] { return s.host.status == Status::STATUS_RUNNING && !s.engine->busy(); }, 60000));
+  CHECK_NEAR(s.host.val(P::PARAM_ID_RANGE_MAX), 6, 1e-4);
+  CHECK(s.host.logged("radar answers getRange: settings enabled"));
+  CHECK(s.engine->set_desired(P::PARAM_ID_LATENCY_OFF, 30, s.t));
+  CHECK(s.idle());
+  CHECK_NEAR(s.host.val(P::PARAM_ID_LATENCY_OFF), 30, 1e-4);
+  CHECK_STR(s.host.last_error, "");
+}
+
+TEST(setting_for_the_target_mode_during_a_switch) {
+  {
+    Sim s(Model::MODEL_SEN0609);
+    CHECK(s.booted());
+    s.engine->set_desired(P::PARAM_ID_WORK_MODE, 1, s.t);
+    s.run(1000);
+    CHECK(s.engine->busy());  // the switch has started
+    CHECK(s.engine->set_desired(P::PARAM_ID_THR_FACTOR, 10, s.t));
+    CHECK(s.idle());
+    CHECK(s.radar.run_app == 1);
+    CHECK(s.radar.count("setThrFactor 10") == 1);
+    size_t app_idx = 0, thr_idx = 0;
+    for (size_t i = 0; i < s.radar.received.size(); i++) {
+      if (s.radar.received[i] == "setRunApp 1")
+        app_idx = i;
+      if (s.radar.received[i] == "setThrFactor 10")
+        thr_idx = i;
+    }
+    CHECK(app_idx > 0 && thr_idx > app_idx);  // applied once the new app has been read
+    CHECK_NEAR(s.host.val(P::PARAM_ID_THR_FACTOR), 10, 1e-4);
+    CHECK_STR(s.host.last_error, "");
+  }
+  {
+    // the switch does not happen: the setting for the other app is dropped, never sent to the wrong app
+    Sim s(Model::MODEL_SEN0609);
+    CHECK(s.booted());
+    s.radar.scripted["setRunApp 1"].push_back({});
+    s.engine->set_desired(P::PARAM_ID_WORK_MODE, 1, s.t);
+    s.run(1000);
+    CHECK(s.engine->set_desired(P::PARAM_ID_THR_FACTOR, 10, s.t));
+    CHECK(s.idle());
+    s.run(3000);
+    CHECK(s.radar.count("setThrFactor") == 0);
+    CHECK(s.engine->work_mode() == WorkMode::WORK_MODE_PRESENCE);
+    CHECK(s.host.logged("speed_threshold_factor is only available in speed_and_distance mode"));
+  }
+}
+
 int main(int argc, char **argv) {
   auto &reg = mini_test::Registry::get();
   int failed_tests = 0;

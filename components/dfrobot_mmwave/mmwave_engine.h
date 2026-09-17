@@ -155,6 +155,7 @@ class Engine {
     RESULT_TIMEOUT,
     RESULT_UNSAVED,
     RESULT_NOT_STOPPED,
+    RESULT_MALFORMED,  // a Response whose values could not all be parsed
   };
 
   struct InFlight {
@@ -211,6 +212,8 @@ class Engine {
   void enqueue_gets_(uint16_t group_mask);
   WorkMode read_mode_() const;
   bool param_in_current_mode_(ParamId id) const;
+  bool param_in_mode_(ParamId id, WorkMode mode) const;
+  void set_mode_error_(ParamId id, WorkMode mode);
   void check_report_after_recovery_();
   uint16_t readable_groups_() const;
   bool group_usable_(GroupId g) const;
@@ -228,7 +231,6 @@ class Engine {
   void update_occupancy_();
   void check_targets_decay_();
   void check_link_();
-  bool report_expected_() const;
   void publish_idle_targets_();
 
   // state publishing
@@ -321,6 +323,7 @@ class Engine {
   bool report_check_armed_{false};
   uint32_t report_check_deadline_ms_{0};
   bool mode_switch_pending_{false};  // an identify-and-read after setRunApp is still running
+  bool mode_switch_rejected_{false};  // setRunApp was refused; the error is already set
   WorkMode mode_switch_target_{WorkMode::WORK_MODE_UNKNOWN};
   bool mode_wait_active_{false};
   bool mode_wait_seen_{false};

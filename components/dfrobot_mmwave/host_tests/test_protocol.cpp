@@ -3,6 +3,7 @@
 #include "../mmwave_formatter.h"
 #include "../mmwave_line_reader.h"
 #include "../mmwave_params.h"
+#include "../mmwave_publish_filter.h"
 #include "../mmwave_responses.h"
 #include "mini_test.h"
 
@@ -291,4 +292,37 @@ TEST(param_tables) {
     CHECK(param_spec(static_cast<ParamId>(i)).id == static_cast<ParamId>(i));
   for (uint8_t i = 0; i < GROUP_COUNT; i++)
     CHECK(group_spec(static_cast<GroupId>(i)).id == static_cast<GroupId>(i));
+}
+
+TEST(nan_repeat_filter_passes_every_finite_reading) {
+  // ESPHome's throttle_with_priority: NaN always passes and restarts the window, a finite value inside the
+  // window is dropped. The component used to drop repeated values before the filter, so a still target
+  // (2 m, 2 m, ...) that followed a NaN never came through.
+  NanRepeatFilter f;
+  uint32_t last_input = 0;
+  bool have_input = false;
+  float shown = NAN;
+  auto throttle = [&](float v, uint32_t now) {
+    if (!have_input || now - last_input >= 500 || std::isnan(v)) {
+      have_input = true;
+      last_input = now;
+      shown = v;
+    }
+  };
+  uint32_t published_nan = 0;
+  for (uint32_t t = 0; t <= 300; t += 100) {  // no target for a while
+    if (f.next(NAN)) {
+      published_nan++;
+      throttle(NAN, t);
+    }
+  }
+  CHECK(published_nan == 1);
+  for (uint32_t t = 400; t <= 2000; t += 100) {  // a still target
+    if (f.next(2.0f))
+      throttle(2.0f, t);
+  }
+  CHECK_NEAR(shown, 2.0, 1e-6);
+  CHECK(f.next(2.0f));
+  CHECK(f.next(NAN));
+  CHECK(!f.next(NAN));
 }

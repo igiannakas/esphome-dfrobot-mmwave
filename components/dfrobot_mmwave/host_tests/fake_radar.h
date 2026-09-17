@@ -41,6 +41,8 @@ struct FakeRadar {
   bool reject_sets = false;          // every set* answers Error
   bool silent_unknown = false;       // unknown commands get no reply at all (not even the prompt)
   std::string reject_set_prefix;     // set commands starting with this answer Error
+  // exact command line -> reply lines to send instead of the normal answer, one entry used per command
+  std::map<std::string, std::deque<std::vector<std::string>>> scripted;
   // C4001 bench behaviour (SEN0609): saveConfig answers a bare Error when nothing changed, a set that
   // is clamped to the stored value changes nothing, and "save cfg complete" is never printed.
   bool c4001_save_error_if_unchanged = true;
@@ -177,6 +179,14 @@ struct FakeRadar {
       this->on_cmd(line);
     if (this->echo && !this->silent_unknown)
       this->send_line(line);
+    auto script = this->scripted.find(line);
+    if (script != this->scripted.end() && !script->second.empty()) {
+      for (const auto &reply : script->second.front())
+        this->send_line(reply);
+      script->second.pop_front();
+      this->prompt();
+      return;
+    }
     if ((this->reject_sets && line.rfind("set", 0) == 0) ||
         (!this->reject_set_prefix.empty() && line.rfind(this->reject_set_prefix, 0) == 0)) {
       this->set_error();
@@ -640,7 +650,9 @@ struct Sim {
   uint32_t t = 0;
   bool pin = false;
 
-  explicit Sim(Model m, std::function<void(EngineConfig &, FakeRadar &)> setup = nullptr) : radar(m) {
+  explicit Sim(Model m, std::function<void(EngineConfig &, FakeRadar &)> setup = nullptr,
+               std::function<void(Engine &)> before_begin = nullptr)
+      : radar(m) {
     this->cfg.model = m;
     if (setup)
       setup(this->cfg, this->radar);
@@ -648,6 +660,8 @@ struct Sim {
     this->host.clock = &this->t;
     this->engine = new Engine(this->cfg, &this->host);
     this->engine->set_log_level(LogLevel::LOG_LEVEL_VERBOSE);
+    if (before_begin)
+      before_begin(*this->engine);
     this->engine->begin(0);
   }
   ~Sim() { delete this->engine; }

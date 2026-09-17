@@ -42,6 +42,7 @@ static constexpr uint8_t CMD_FLAG_OPTIONAL_SAVE = 1 << 0;  // skipped if no set 
 static constexpr uint8_t CMD_FLAG_START_RETRY = 1 << 1;    // start already retried after "can't startSensor"
 static constexpr uint8_t CMD_FLAG_FAILURE_PATH = 1 << 2;   // command sent while unwinding a failed operation
 static constexpr uint8_t CMD_FLAG_RECOVERY = 1 << 3;       // start sent after a recovery; Error = already running
+static constexpr uint8_t CMD_FLAG_REPARSE = 1 << 4;        // get sent again after an unparseable Response
 
 struct Command {
   CmdId id{CmdId::CMD_ID_FLUSH};

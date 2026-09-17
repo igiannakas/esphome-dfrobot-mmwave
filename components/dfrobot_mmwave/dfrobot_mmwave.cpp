@@ -273,17 +273,17 @@ void DfrobotMmwave::on_targets(const protocol::TargetFrame &frame) {
 #ifdef USE_SENSOR
   // NAN publishes "unknown": a C4001 in presence mode has no target data at all
   const float count = frame.available ? static_cast<float>(frame.count) : NAN;
-  if (this->target_count_sensor_ != nullptr && this->target_count_dedup_.next(count))
+  if (this->target_count_sensor_ != nullptr && this->target_count_nan_filter_.next(count))
     this->target_count_sensor_->publish_state(count);
   for (uint8_t i = 0; i < protocol::MAX_TARGETS; i++) {
-    if (this->target_distance_sensors_[i] != nullptr && this->target_distance_dedup_[i].next(frame.distance[i]))
+    if (this->target_distance_sensors_[i] != nullptr && this->target_distance_nan_filter_[i].next(frame.distance[i]))
       this->target_distance_sensors_[i]->publish_state(frame.distance[i]);
-    if (this->target_snr_sensors_[i] != nullptr && this->target_snr_dedup_[i].next(frame.snr[i]))
+    if (this->target_snr_sensors_[i] != nullptr && this->target_snr_nan_filter_[i].next(frame.snr[i]))
       this->target_snr_sensors_[i]->publish_state(frame.snr[i]);
   }
-  if (this->target_1_speed_sensor_ != nullptr && this->target_speed_dedup_.next(frame.speed))
+  if (this->target_1_speed_sensor_ != nullptr && this->target_speed_nan_filter_.next(frame.speed))
     this->target_1_speed_sensor_->publish_state(frame.speed);
-  if (this->target_1_energy_sensor_ != nullptr && this->target_energy_dedup_.next(frame.energy))
+  if (this->target_1_energy_sensor_ != nullptr && this->target_energy_nan_filter_.next(frame.energy))
     this->target_1_energy_sensor_->publish_state(frame.energy);
 #endif
 }

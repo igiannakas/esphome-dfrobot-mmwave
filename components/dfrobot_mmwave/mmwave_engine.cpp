@@ -144,6 +144,23 @@ void Engine::publish_param_(ParamId id) {
   this->host_->on_param(id, shown, s.reported_valid && this->param_in_current_mode_(id));
 }
 
+bool Engine::param_in_mode_(ParamId id, WorkMode mode) const {
+  if (!this->dialect_->has_modes || mode == WorkMode::WORK_MODE_UNKNOWN)
+    return true;
+  uint8_t bit = mode == WorkMode::WORK_MODE_SPEED ? MODE_MASK_SPEED : MODE_MASK_PRESENCE;
+  return (param_spec(id).modes & bit) != 0;
+}
+
+void Engine::set_mode_error_(ParamId id, WorkMode mode) {
+  if (param_spec(id).group == GroupId::GROUP_ID_UART_OUT1) {
+    // C4001 firmware: getUartOutput/setUartOutput answer Error in the speed app
+    this->set_error_("uart output settings are presence-mode only");
+  } else {
+    this->set_error_("%s is only available in %s mode", param_name(id),
+                     mode == WorkMode::WORK_MODE_SPEED ? "presence" : "speed_and_distance");
+  }
+}
+
 bool Engine::param_in_current_mode_(ParamId id) const {
   if (!this->dialect_->has_modes || this->work_mode_ == WorkMode::WORK_MODE_UNKNOWN)
     return true;
@@ -201,6 +218,8 @@ bool Engine::param_available(ParamId id) const {
 }
 
 bool Engine::set_desired(ParamId id, float value, uint32_t now) {
+  if (this->host_ == nullptr)
+    return false;  // not configured yet: nothing to validate against or publish to
   this->now_ = now;
   const char *name = param_name(id);
   const ParamSpec &spec = param_spec(id);
@@ -216,23 +235,18 @@ bool Engine::set_desired(ParamId id, float value, uint32_t now) {
   }
   // checked before the capability marks: a probe that failed in the other app is not a verdict
   if (this->dialect_->has_modes && id != ParamId::PARAM_ID_WORK_MODE) {
+    // a requested or running switch counts as done: the change is applied once the new app has been read
     WorkMode eff = this->work_mode_;
     const ParamState &wm = this->params_[ParamId::PARAM_ID_WORK_MODE];
-    if (wm.dirty)
+    if (wm.dirty) {
       eff = wm.desired >= 0.5f ? WorkMode::WORK_MODE_SPEED : WorkMode::WORK_MODE_PRESENCE;
-    if (eff != WorkMode::WORK_MODE_UNKNOWN) {
-      uint8_t bit = eff == WorkMode::WORK_MODE_SPEED ? MODE_MASK_SPEED : MODE_MASK_PRESENCE;
-      if ((spec.modes & bit) == 0) {
-        if (spec.group == GroupId::GROUP_ID_UART_OUT1) {
-          // C4001 firmware: getUartOutput/setUartOutput answer Error in the speed app
-          this->set_error_("uart output settings are presence-mode only");
-        } else {
-          this->set_error_("%s is only available in %s mode", name,
-                           eff == WorkMode::WORK_MODE_SPEED ? "presence" : "speed_and_distance");
-        }
-        this->publish_param_(id);
-        return false;
-      }
+    } else if (this->mode_switch_pending_ && !this->mode_switch_rejected_) {
+      eff = this->mode_switch_target_;
+    }
+    if (!this->param_in_mode_(id, eff)) {
+      this->set_mode_error_(id, eff);
+      this->publish_param_(id);
+      return false;
     }
   }
   if (!this->param_available(id)) {
@@ -398,9 +412,10 @@ void Engine::on_reply_(const char *line, const Reply &r) {
     case CmdId::CMD_ID_GET_GROUP:
     case CmdId::CMD_ID_GET_RUN_APP:
       if (k == ReplyKind::REPLY_KIND_RESPONSE) {
-        if (r.nvals == 0) {
+        if (r.nvals == 0 || r.bad_value) {
+          // a corrupted line, not the radar's answer: nothing from it is applied
           this->logf_(LogLevel::LOG_LEVEL_WARN, "unparseable Response to '%s': %s", this->last_cmd_, line);
-          this->start_tail_(Result::RESULT_ERROR, TAIL_MS);
+          this->start_tail_(Result::RESULT_MALFORMED, TAIL_MS);
         } else {
           this->inflight_.nvals = r.nvals;
           for (uint8_t i = 0; i < r.nvals; i++)
@@ -521,7 +536,8 @@ void Engine::drive_queue_() {
     if (!this->mode_wait_seen_ && this->now_ - this->mode_wait_start_ms_ < MODE_SWITCH_WAIT_MS)
       return;
     this->mode_wait_active_ = false;
-    if (this->mode_wait_seen_) {
+    const bool reported = this->mode_wait_seen_;  // the presence inference below marks the wait as seen
+    if (reported) {
       this->logf_(LogLevel::LOG_LEVEL_DEBUG, "new app is reporting");
     } else if (this->mode_switch_target_ == WorkMode::WORK_MODE_PRESENCE) {
       // C4001 firmware: the speed app is never silent, and the presence app prints nothing while
@@ -531,6 +547,17 @@ void Engine::drive_queue_() {
       this->set_work_mode_(WorkMode::WORK_MODE_PRESENCE);
     } else {
       this->logf_(LogLevel::LOG_LEVEL_DEBUG, "no report from the new app yet");
+    }
+    if (!reported) {
+      // Silence does not prove that setRunApp was carried out: a command lost on the way leaves the radar stopped
+      // in the old app, where it is just as silent. Start it before the identify-and-read; a radar that already
+      // runs answers that it is started, and one that was still stopped starts in whatever app it is in, so the
+      // reports and reads that follow show the mode it is really in.
+      Command start;
+      start.id = CmdId::CMD_ID_START;
+      start.retries = 1;
+      start.flags = CMD_FLAG_RECOVERY;
+      this->queue_.push_front(start);
     }
   }
   for (uint8_t guard = 0; guard < 16 && !this->inflight_.active && !this->queue_.empty(); guard++) {
@@ -662,6 +689,11 @@ void Engine::complete_(Result result) {
   Command c = this->inflight_.cmd;
   this->inflight_.active = false;
   this->inflight_.tail = false;
+  if (result == Result::RESULT_MALFORMED && (c.flags & CMD_FLAG_REPARSE) == 0) {
+    c.flags |= CMD_FLAG_REPARSE;
+    if (this->queue_.push_front(c))
+      return;  // asked once more before the read counts as failed
+  }
   this->on_done_(c, result);
 }
 
@@ -671,6 +703,7 @@ void Engine::on_done_(const Command &c, Result result) {
                    : result == Result::RESULT_TIMEOUT     ? "timeout"
                    : result == Result::RESULT_UNSAVED     ? "unsaved"
                    : result == Result::RESULT_NOT_STOPPED ? "not stopped"
+                   : result == Result::RESULT_MALFORMED   ? "unparseable"
                                                           : "not recognized";
   switch (c.id) {
     case CmdId::CMD_ID_GET_SWV:
@@ -730,6 +763,10 @@ void Engine::on_done_(const Command &c, Result result) {
           if (probe && boot)
             mark_unsupported();
         }
+      } else if (result == Result::RESULT_MALFORMED) {
+        // unparseable twice: a failed read, never proof that the firmware lacks the setting
+        if (!this->first_read_phase_)
+          this->op_failed_(c, "unparseable response");
       } else if (probe && boot) {
         mark_unsupported();
         this->logf_(LogLevel::LOG_LEVEL_INFO, "%s: %s, not supported by this firmware", gs.get_cmd, rs);
@@ -751,9 +788,18 @@ void Engine::on_done_(const Command &c, Result result) {
 
     case CmdId::CMD_ID_SET_GROUP:
       if (c.group == GroupId::GROUP_ID_RUN_APP) {
-        // C4001 firmware: setRunApp restarts the radar into the new app at once and persists by itself
-        this->set_running_(true);
-        this->mode_wait_seen_ = false;
+        if (result == Result::RESULT_OK) {
+          // C4001 firmware: setRunApp restarts the radar into the new app at once and persists by itself
+          this->set_running_(true);
+          this->mode_wait_seen_ = false;
+        } else {
+          // The radar is still in the old app, stopped by our sensorStop. Skip the wait for the new app: the
+          // identify-and-read that follows starts the radar again and publishes the mode it is really in.
+          this->mode_switch_rejected_ = true;
+          if (!this->queue_.empty() && this->queue_.front().id == CmdId::CMD_ID_MARK_MODE_WAIT)
+            this->queue_.pop_front();
+          this->set_error_("work_mode: radar rejected '%s' (%s)", this->last_cmd_, rs);
+        }
       } else if (result == Result::RESULT_OK) {
         this->set_ok_mask_ |= gbit(c.group);
       } else if (result == Result::RESULT_TIMEOUT) {
@@ -1134,6 +1180,9 @@ void Engine::finish_read_(bool boot) {
     if ((this->read_ok_mask_ & gbit(GroupId::GROUP_ID_RANGE)) == 0) {
       this->unsupported_firmware_ = true;
       this->set_error_("radar does not answer getRange: firmware not supported, settings disabled");
+    } else if (this->unsupported_firmware_) {
+      this->unsupported_firmware_ = false;
+      this->logf_(LogLevel::LOG_LEVEL_INFO, "radar answers getRange: settings enabled");
     }
     for (uint8_t i = 0; i < PARAM_COUNT; i++) {
       auto p = static_cast<ParamId>(i);
@@ -1319,6 +1368,11 @@ void Engine::start_txn_() {
   for (uint8_t i = 0; i < PARAM_COUNT; i++) {
     auto p = static_cast<ParamId>(i);
     ParamState &s = this->params_[p];
+    if (s.dirty && !this->param_in_current_mode_(p)) {
+      s.dirty = false;
+      this->set_mode_error_(p, this->work_mode_);
+      this->publish_param_(p);
+    }
     this->snapshot_has_[i] = s.dirty;
     if (s.dirty) {
       this->snapshot_[i] = s.desired;
@@ -1492,6 +1546,7 @@ void Engine::start_mode_switch_() {
   this->failing_ = false;
   this->mode_switch_target_ = target;
   this->mode_switch_pending_ = true;
+  this->mode_switch_rejected_ = false;
   this->mode_confirm_pending_ = false;
   this->user_stopped_ = false;
   this->stopped_by_op_ = true;
@@ -1513,6 +1568,10 @@ void Engine::start_mode_switch_() {
 void Engine::finish_mode_switch_() {
   this->mode_switch_pending_ = false;
   this->publish_param_(ParamId::PARAM_ID_WORK_MODE);
+  if (this->mode_switch_rejected_) {
+    this->mode_switch_rejected_ = false;  // reported when the radar refused it
+    return;
+  }
   const char *want = this->mode_switch_target_ == WorkMode::WORK_MODE_SPEED ? "speed_and_distance" : "presence";
   if (this->work_mode_ == this->mode_switch_target_) {
     this->logf_(LogLevel::LOG_LEVEL_DEBUG, "work_mode confirmed");
@@ -1653,6 +1712,7 @@ void Engine::enter_backoff_(const char *why) {
     this->recover_start_ = true;
   this->mode_wait_active_ = false;
   this->mode_switch_pending_ = false;
+  this->mode_switch_rejected_ = false;
   this->report_check_armed_ = false;
   this->drop_uart_presence_();
   this->logf_(LogLevel::LOG_LEVEL_WARN, "radar link lost (%s); probing again in %us", why,
@@ -1672,6 +1732,7 @@ void Engine::reset_radar_state_() {
   this->stop_unconfirmed_ = false;
   this->mode_wait_active_ = false;
   this->mode_switch_pending_ = false;
+  this->mode_switch_rejected_ = false;
   this->report_check_armed_ = false;
   this->drop_uart_presence_();
   for (uint8_t i = 0; i < PARAM_COUNT; i++)
@@ -1839,15 +1900,19 @@ void Engine::handle_targets_(const char *line, const Reply &r) {
       f.speed = speed;  // signed: positive moves away, negative approaches
       f.energy = energy;
       this->host_->on_targets(f);
+      this->last_target_ms_ = this->now_;
       this->targets_zero_published_ = false;
       this->set_uart_presence_(true, true);
     } else if (count == 0) {
       f.count = 0;
       this->host_->on_targets(f);
+      this->last_target_ms_ = this->now_;
       this->targets_zero_published_ = true;
       this->set_uart_presence_(false, true);
+    } else {
+      // the C4001 tracks one target; anything else is a corrupted line and must not keep old data alive
+      this->logf_(LogLevel::LOG_LEVEL_VERBOSE, "bad $DFDMD target count %ld, dropped", count);
     }
-    this->last_target_ms_ = this->now_;
     return;
   }
 
@@ -2037,30 +2102,14 @@ void Engine::check_uart_presence_stale_() {
   this->drop_uart_presence_();
 }
 
-bool Engine::report_expected_() const {
-  // C4001 firmware: the speed app streams $DFDMD whatever the presence-app output settings say
-  if (this->dialect_->has_modes && this->work_mode_ == WorkMode::WORK_MODE_SPEED)
-    return true;
-  const ParamState &en = this->params_[ParamId::PARAM_ID_UART_PRESENCE_EN];
-  if (en.reported_valid && en.reported < 0.5f)
-    return false;
-  if (this->report_passive_)
-    return false;
-  const ParamState &period = this->params_[ParamId::PARAM_ID_UART_REPORT_PERIOD];
-  if (period.reported_valid && period.reported * 2000.0f > static_cast<float>(LINK_TIMEOUT_MS))
-    return false;
-  return true;
-}
-
 void Engine::check_link_() {
   if (this->life_ != Life::LIFE_RUNNING || this->op_ != Op::OP_NONE || this->inflight_.active || !this->queue_.empty())
     return;
-  if (this->user_stopped_ || !this->report_expected_())
-    return;
   if (this->now_ - this->last_rx_ms_ < LINK_TIMEOUT_MS)
     return;
-  // Silence alone is not proof: some firmwares only report on change. Ask once; only a ping that
-  // times out takes the link down (see on_done_).
+  // Checked whatever the report settings say: a stopped radar, reports turned off, passive mode or a long
+  // report period are all silent by design, and a streaming radar never gets here. Silence alone is not
+  // proof, so ask once; only a ping that times out takes the link down (see on_done_).
   this->op_ = Op::OP_PING;
   Command ping;
   ping.id = CmdId::CMD_ID_GET_SWV;
