@@ -333,10 +333,8 @@ The SEN0610 is expected to match the SEN0609 within its 12 m range.
 
 The SEN0609 and the SEN0395 have been through the hardware test plan (`docs/hardware-test-plan.md`) apart from the 24-hour soak; the SEN0610 not yet.
 
-1. **Validate the SEN0610 on hardware.** Its 12 m limit and factory defaults are from the datasheet and may be wrong in the same ways the SEN0609's were. The SEN0395's old `detRangeCfg` firmware is detected and left read-only, but has not been seen on the bench.
-2. **A 24-hour soak on each radar**, watching heap, uptime and the log for anything unexpected.
-3. **Check whether a factory reset on a C4001 also resets the speed-and-distance mode's settings.** It restores the presence mode's; the other mode wasn't checked.
-4. **More replay tests.** There is one SEN0395 session in `host_tests/replay/`, rebuilt from the bench notes; raw serial captures of each radar would make it stronger and add the C4001s.
+1. **Validate the SEN0610 on hardware.** Its 12 m limit and factory defaults are from the datasheet and may be wrong in the same ways the SEN0609's were.
+2. **Check whether a factory reset on a C4001 also resets the speed-and-distance mode's settings.** It restores the presence mode's; the other mode wasn't checked.
 
 ## Tests
 
