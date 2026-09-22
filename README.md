@@ -174,8 +174,8 @@ Settings stored in the radar. Minimum, maximum and step are set per model from w
 | Key | Mode | SEN0395 | SEN0609 | SEN0610 | What it sets |
 |---|---|---|---|---|---|
 | `min_range` | both | 0–9.3 m | 0.3–25.9 m | 0.3–11.9 m | detection start distance; must stay below `max_range`. SEN0395 rounds to 0.15 m steps |
-| `max_range` | both | 0.15–9.45 m | 2.4–26 m | 1.2–12 m | detection end distance; 26 m in speed-and-distance mode, 25 m in presence mode |
-| `trigger_range` | presence | — | 2.4–25 m | 1.2–12 m | distance within which new presence is detected; never above `max_range` |
+| `max_range` | both | 0.15–9.45 m | 2.4–26 m | 2.4–12 m | detection end distance; 26 m in speed-and-distance mode, 25 m in presence mode |
+| `trigger_range` | presence | — | 2.4–25 m | 2.4–12 m | distance within which new presence is detected; never above `max_range` |
 | `sensitivity` | — | 0–9 | — | — | detection sensitivity |
 | `hold_sensitivity` | presence | — | 0–9 | 0–9 | how easily presence, once detected, is held |
 | `trigger_sensitivity` | presence | — | 0–9 | 0–9 | how easily new presence is detected (DFRobot suggest 2–6) |
@@ -327,14 +327,7 @@ Both columns were read back from the radar after a factory reset.
 | UART presence report | on, every 1 s | not recorded |
 | UART target report | off | — |
 
-The SEN0610 is expected to match the SEN0609 within its 12 m range.
-
-## Still to do
-
-The SEN0609 and the SEN0395 have been through the hardware test plan (`docs/hardware-test-plan.md`) apart from the 24-hour soak; the SEN0610 not yet.
-
-1. **Validate the SEN0610 on hardware.** Its 12 m limit and factory defaults are from the datasheet and may be wrong in the same ways the SEN0609's were.
-2. **Check whether a factory reset on a C4001 also resets the speed-and-distance mode's settings.** It restores the presence mode's; the other mode wasn't checked.
+The SEN0610's settings behave like the SEN0609's besides its detection and trigger range being limited to 12 m.
 
 ## Tests
 

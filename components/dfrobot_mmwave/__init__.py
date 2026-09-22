@@ -76,8 +76,8 @@ NUMBER_LIMITS = {
     },
     "SEN0610": {
         "min_range": (0.3, 11.9, 0.1),
-        "max_range": (1.2, 12.0, 0.1),
-        "trigger_range": (1.2, 12.0, 0.1),
+        "max_range": (2.4, 12.0, 0.1),
+        "trigger_range": (2.4, 12.0, 0.1),
         "hold_sensitivity": (0.0, 9.0, 1.0),
         "trigger_sensitivity": (0.0, 9.0, 1.0),
         "on_latency": (0.0, 2.0, 0.01),

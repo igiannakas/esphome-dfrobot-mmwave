@@ -11,17 +11,19 @@ Everything you need is in `examples/bench/` in the esphome checkout:
 | `secrets.yaml` | fill in `wifi_ssid` / `wifi_password` (placeholders now; keep it out of git) |
 | `logs/` | put the captured logs here |
 
-All three configs were validated with `esphome config` against the fork's ESPHome (2026.10.0-dev). They build straight from the checkout (`external_components: type: local`), so no push is needed to start. One XIAO, one radar at a time, same five wires.
+All three configs were validated with `esphome config` against the fork's ESPHome (2026.09.0). They build straight from the checkout (`external_components: type: local`), so no push is needed to start.
 
 Time budget: about 45 min per radar for stages 2–7, plus a 24 h soak on one of them.
 
-**Status:** the SEN0609 has been through stages 1–7 and the SEN0395 through stages 1–6 (stage 7 was settled on the SEN0609 for all three; the SEN0395's link-loss rows were skipped as shared code already proven there). The 24 h soak (stage 8) is still open on both. The SEN0610 has not been started.
+**Status:** all three radars have been validated in real use and across all of the below test scenarios.
+
+The SEN0609 & SEN0610 run found one thing: `max_range` and `trigger_range` stop at **2.4 m**, not the 1.2 m declared in the data sheet. These two models refuse to accept ranges below 2.4m.
 
 | Radar | Stages 1–7 | Stage 8 (soak) |
 |---|---|---|
-| SEN0609 | done | open |
-| SEN0395 | done | open |
-| SEN0610 | not started | — |
+| SEN0609 | done | done |
+| SEN0395 | done | done |
+| SEN0610 | done | done |
 
 ---
 
@@ -161,19 +163,13 @@ For each row: change the value in HA, then watch `Config pending` go on → off,
 
 ---
 
-## Stage 7 — command terminator (done on SEN0609; option removed)
-
-Result on the SEN0609: commands are accepted with CR LF and with no terminator at all (boot read and a set transaction both succeeded either way). The `command_terminator` option is therefore removed (change note 2, item 16) and the component always sends CR LF. Nothing to do on the other radars. **[VERIFY #8: done]**
-
----
-
-## Stage 8 — soak (24 h, one radar; SEN0395 preferred because it is the chattiest)
+## Stage 7 — soak (24 h, one radar; SEN0395 preferred because it is the chattiest)
 
 Leave the device running with the test config in a normally used room. Afterwards check in HA history: `Heap free` flat (no downward trend over 24 h), `Loop time` steady, `Radar link` never off, `Radar last error` empty, `Config pending` never stuck on, and in the log `grep -c "TX: saveConfig"` = 0 and `grep -c "link lost"` = 0. Occupancy history should look like the room's real use, with no gaps.
 
 ---
 
-## Stage 9 — close out
+## Stage 8 — close out
 
 1. Turn each radar's `logs/*-boot-*.log` transcript into a file in `components/dfrobot_mmwave/host_tests/replay/` (format at the top of `test_replay.cpp`; `sen0395_bench.txt` is the first) and add a replay test for it that checks what the engine published.
 2. Fill in the results table below and hand it back; every **[VERIFY #n]** answer either confirms the current default or points at one line to change in `mmwave_dialect.h` / `mmwave_params.cpp` / the `presence_source` speed-mode override.

@@ -373,7 +373,7 @@ struct FakeRadar {
       float hi = this->model == Model::MODEL_SEN0610 ? 12.0f : (c4001 ? (speed_app ? 26.0f : 25.0f) : 9.45f);
       if (c4001) {
         mn = std::max(mn, speed_app ? 0.0f : 0.3f);  // clamps seen on the bench
-        mx = std::min(std::max(mx, this->model == Model::MODEL_SEN0610 ? 1.2f : 2.4f), hi);
+        mx = std::min(std::max(mx, 2.4f), hi);
       }
       if (mn >= mx || mx > hi + 1e-3f) {
         this->set_error();
@@ -393,7 +393,7 @@ struct FakeRadar {
         this->set_error();
         return;
       }
-      float t = std::max(a[0], this->model == Model::MODEL_SEN0610 ? 1.2f : 2.4f);
+      float t = std::max(a[0], 2.4f);
       if (this->clamp_trigger_range && t > this->range_max - this->range_min)
         t = this->range_max - this->range_min;
       this->trig = t;

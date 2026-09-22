@@ -888,8 +888,8 @@ TEST(range_limits_always_leave_a_window) {
 
 TEST(c4001_max_range_floor) {
   CHECK_NEAR(param_limits(Model::MODEL_SEN0609, P::PARAM_ID_RANGE_MAX).lo, 2.4, 1e-6);
-  CHECK_NEAR(param_limits(Model::MODEL_SEN0610, P::PARAM_ID_RANGE_MAX).lo, 1.2, 1e-6);
-  CHECK_NEAR(param_limits(Model::MODEL_SEN0610, P::PARAM_ID_TRIG_RANGE).lo, 1.2, 1e-6);
+  CHECK_NEAR(param_limits(Model::MODEL_SEN0610, P::PARAM_ID_RANGE_MAX).lo, 2.4, 1e-6);
+  CHECK_NEAR(param_limits(Model::MODEL_SEN0610, P::PARAM_ID_TRIG_RANGE).lo, 2.4, 1e-6);
   CHECK_NEAR(param_limits(Model::MODEL_SEN0609, P::PARAM_ID_TRIG_RANGE).lo, 2.4, 1e-6);
   CHECK_NEAR(param_limits(Model::MODEL_SEN0609, P::PARAM_ID_INHIBIT).hi, 60, 1e-6);
   CHECK_NEAR(param_limits(Model::MODEL_SEN0609, P::PARAM_ID_LATENCY_ON).hi, 2, 1e-6);
@@ -1035,15 +1035,15 @@ TEST(coupling_respects_limits) {
     CHECK_NEAR(s.host.val(P::PARAM_ID_RANGE_MAX), 12, 1e-4);
     CHECK_NEAR(s.host.val(P::PARAM_ID_TRIG_RANGE), 12, 1e-4);
     CHECK_STR(s.host.last_error, "");
-    // the SEN0610 floor is 1.2 for both
-    s.engine->set_desired(P::PARAM_ID_RANGE_MAX, 1.2f, s.t);
+    // the SEN0610 floor is 2.4 for both, like the SEN0609 (measured on the bench)
+    s.engine->set_desired(P::PARAM_ID_RANGE_MAX, 2.4f, s.t);
     CHECK(s.idle());
-    CHECK(s.radar.count("setRange 0.6 1.2") == 1);
-    CHECK(s.radar.count("setTrigRange 1.2") == 1);
-    CHECK_NEAR(s.host.val(P::PARAM_ID_RANGE_MAX), 1.2, 1e-4);
-    CHECK_NEAR(s.host.val(P::PARAM_ID_TRIG_RANGE), 1.2, 1e-4);
+    CHECK(s.radar.count("setRange 0.6 2.4") == 1);
+    CHECK(s.radar.count("setTrigRange 2.4") == 1);
+    CHECK_NEAR(s.host.val(P::PARAM_ID_RANGE_MAX), 2.4, 1e-4);
+    CHECK_NEAR(s.host.val(P::PARAM_ID_TRIG_RANGE), 2.4, 1e-4);
     CHECK_STR(s.host.last_error, "");
-    CHECK(!s.engine->set_desired(P::PARAM_ID_RANGE_MAX, 1.1f, s.t));
+    CHECK(!s.engine->set_desired(P::PARAM_ID_RANGE_MAX, 2.3f, s.t));
     CHECK_CONTAINS(s.host.last_error, "outside");
   }
   {
