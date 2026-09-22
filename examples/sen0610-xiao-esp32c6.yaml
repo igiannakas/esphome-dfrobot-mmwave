@@ -1,0 +1,383 @@
+# ================================================================
+# PRESENCE RADAR  —  XIAO ESP32-C6 + DFRobot SEN0610 (C4001, 12 m)
+# ================================================================
+
+substitutions:
+  # --- DEVICE -----------------------------------------------
+  # Hostname, and the device name in Home Assistant.
+  device_name: occupancy-sensor
+  friendly_name: "Occupancy Sensor"
+
+  # --- NETWORK  (values in secrets.yaml next to this file) --
+  wifi_ssid: !secret wifi_ssid
+  wifi_password: !secret wifi_password
+
+  # --- RADAR MODEL ------------------------------------------
+  #
+  # SEN0610 = C4001 12 m, UART occupancy; no OUT pin.
+  #
+  radar_model: SEN0610
+
+  # --- PINS  (Seeed XIAO ESP32-C6, silkscreen names) --------
+  #
+  #   D9    <- SEN0610 D/T (TX)
+  #   D10   -> SEN0610 C/R (RX)
+  #
+  pin_radar_tx: D10
+  pin_radar_rx: D9
+
+  # --- SPEED-AND-DISTANCE MODE ------------------------------
+  # Minimum time between target sensor updates.
+  target_throttle: 500ms
+
+  # --- DIAGNOSTICS ------------------------------------------
+  # Update interval of the ESP temperature, WiFi signal and
+  # uptime sensors.
+  diag_interval: 60s
+
+# ============================================================
+# EXTERNAL COMPONENTS
+#
+# The dfrobot_mmwave component, checked for updates on every
+# build.
+# ============================================================
+
+external_components:
+  - source: github://igiannakas/esphome-dfrobot-mmwave
+    components: [dfrobot_mmwave]
+    refresh: always
+
+# ============================================================
+# FIRMWARE
+# ============================================================
+
+esphome:
+  name: ${device_name}
+  friendly_name: "${friendly_name}"
+  on_boot:
+    # Select the PCB antenna before WiFi starts (see ANTENNA).
+    - priority: 700
+      then:
+        - output.turn_off: rf_switch_power
+        - output.turn_off: antenna_select
+
+esp32:
+  board: seeed_xiao_esp32c6
+  framework:
+    type: esp-idf
+
+# Logs over the network only (USB serial logging off).
+# DEBUG adds every line exchanged with the radar.
+logger:
+  level: INFO
+  baud_rate: 0
+
+# ============================================================
+# CONNECTIVITY
+# ============================================================
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  # Power saving off for the fastest response.
+  power_save_mode: NONE
+  ssid: "${wifi_ssid}"
+  password: "${wifi_password}"
+  # Fallback hotspot if the WiFi connection fails.
+  ap:
+    ssid: "${device_name}"
+    password: "${wifi_password}"
+
+captive_portal:
+
+# Web page on port 80. Also shows the entities that are
+# hidden from Home Assistant (internal: true).
+web_server:
+  port: 80
+  include_internal: true
+
+# ============================================================
+# ANTENNA
+#
+# The XIAO ESP32-C6 has a PCB antenna and a u.FL connector,
+# picked by an RF switch. Holding both pins low powers the
+# switch and selects the PCB antenna. Without this, WiFi
+# range is reduced.
+#
+#   GPIO3    RF switch power   LOW = powered
+#   GPIO14   antenna select    LOW = PCB antenna
+# ============================================================
+
+output:
+  - platform: gpio
+    id: rf_switch_power
+    pin: GPIO3
+
+  - platform: gpio
+    id: antenna_select
+    pin: GPIO14
+
+# ============================================================
+# RADAR UART
+#
+# 9600 baud is required by the C4001; other rates are
+# rejected.
+# ============================================================
+
+uart:
+  id: radar_uart
+  tx_pin: ${pin_radar_tx}
+  rx_pin: ${pin_radar_rx}
+  baud_rate: 9600
+
+# ============================================================
+# RADAR
+#
+# SEN0610 occupancy is reported over UART.
+# ============================================================
+
+dfrobot_mmwave:
+  id: radar
+  uart_id: radar_uart
+  model: ${radar_model}
+
+# ============================================================
+# BINARY SENSORS
+#
+#   Occupancy             on when UART reports presence
+#   Occupancy - UART      UART source. As SEN0610 has no out pin 
+#                         this matches the occupancy output
+#   Radar - Link          on while the radar is responding
+# ============================================================
+
+binary_sensor:
+  - platform: dfrobot_mmwave
+    occupancy:
+      name: "Occupancy"
+      device_class: occupancy
+    uart_occupancy:
+      name: "Occupancy - UART"
+      disabled_by_default: true
+      entity_category: diagnostic
+    link_ok:
+      name: "Radar - Link"
+      entity_category: diagnostic
+
+# ============================================================
+# TEXT SENSORS
+#
+#   Radar - Status       boot_wait, probing, reading, applying,
+#                        running, stopped, link_lost or
+#                        unsupported_firmware
+#   Radar - Last Error   the latest problem, e.g. a setting the
+#                        radar did not accept. Clears after the
+#                        next successful operation.
+#   Radar - Firmware /   radar version strings (web page only)
+#   Radar - Hardware
+# ============================================================
+
+text_sensor:
+  - platform: dfrobot_mmwave
+    status:
+      name: "Radar - Status"
+    last_error:
+      name: "Radar - Last Error"
+    software_version:
+      name: "Radar - Firmware"
+      internal: true
+    hardware_version:
+      name: "Radar - Hardware"
+      internal: true
+
+# ============================================================
+# NUMBERS
+#
+# Settings stored in the radar. Changes are sent together
+# about a second after the last one, then read back, so the
+# entity always shows the value the radar kept.
+#
+#   Range - Min / Max       detection distance, m
+#   Range - Trigger         distance within which new presence
+#                           is detected, m. Kept at or below
+#                           Range - Max.
+#   Sensitivity - Hold      how easily presence, once detected,
+#                           is held, 0-9
+#   Sensitivity - Trigger   how easily new presence is
+#                           detected, 0-9 (DFRobot suggest 2-6)
+#   Latency - On            how long presence must be detected
+#                           before occupancy turns on, s
+#   Latency - Off           how long after presence is last
+#                           detected before occupancy turns
+#                           off, s
+#   Inhibit Time            after presence clears, how long
+#                           before a new presence can be
+#                           detected, s
+#   UART - Report Period    interval of the repeated UART
+#                           presence report, s. Changes are
+#                           reported immediately either way; a
+#                           shorter period means a dead UART
+#                           link is noticed sooner.
+#   Speed and Distance -    speed-and-distance mode only
+#   Threshold Factor        (web page only)
+# ============================================================
+
+number:
+  - platform: dfrobot_mmwave
+    min_range:
+      name: "Range - Min"
+    max_range:
+      name: "Range - Max"
+    trigger_range:
+      name: "Range - Trigger"
+    hold_sensitivity:
+      name: "Sensitivity - Hold"
+    trigger_sensitivity:
+      name: "Sensitivity - Trigger"
+    on_latency:
+      name: "Latency - On"
+    off_latency:
+      name: "Latency - Off"
+    inhibit_time:
+      name: "Inhibit Time"
+    uart_report_period:
+      name: "UART - Report Period"
+    speed_threshold_factor:
+      name: "Speed and Distance - Threshold Factor"
+      internal: true
+
+# ============================================================
+# SELECTS
+#
+#   Work Mode   presence or speed_and_distance (web page
+#               only). Switching restarts the radar in the
+#               other mode. Each mode keeps its own range
+#               and LED setting.
+#
+# Speed-and-distance mode is a setup tool: the radar tracks
+# one target and reports its distance and speed. From the
+# web page, switch to speed_and_distance, then:
+#
+#   1. With the room empty, check Target - Count stays 0.
+#      A target in an empty room is interference.
+#   2. Walk to the furthest point where you want to be
+#      detected and note Target - Distance.
+#   3. Switch back to presence and set Range - Max to that
+#      distance.
+# ============================================================
+
+select:
+  - platform: dfrobot_mmwave
+    work_mode:
+      name: "Work Mode"
+      internal: true
+
+# ============================================================
+# SWITCHES
+#
+#   Radar - Enabled            starts / stops the radar. Not
+#                              remembered by the radar across
+#                              power cycles.
+#   Radar - LED                on = LED blinks while the radar
+#                              runs (factory setting)
+#   UART - Presence Report     keep enabled: UART is the only
+#                              occupancy source on the SEN0610.
+#   Speed and Distance -       on = also detects micro motion
+#   Micro Motion               such as breathing; off = larger
+#                              movements only. Speed-and-
+#                              distance mode only (web page
+#                              only).
+# ============================================================
+
+switch:
+  - platform: dfrobot_mmwave
+    running:
+      name: "Radar - Enabled"
+    led:
+      name: "Radar - LED"
+    uart_presence_report:
+      name: "UART - Presence Report"
+    speed_micro_motion:
+      name: "Speed and Distance - Micro Motion"
+      internal: true
+
+# ============================================================
+# BUTTONS
+#
+#   Radar - Reread Settings   drops unsent changes and reads
+#                             every setting from the radar
+#   Radar - Restart           reboots the radar
+#   Radar - Factory Reset     restores the radar's factory
+#                             settings
+#   ESP - Restart             reboots the ESP
+# ============================================================
+
+button:
+  - platform: dfrobot_mmwave
+    refresh:
+      name: "Radar - Reread Settings"
+      entity_category: diagnostic
+    restart:
+      name: "Radar - Restart"
+      entity_category: diagnostic
+    factory_reset:
+      name: "Radar - Factory Reset"
+      entity_category: diagnostic
+
+  - platform: restart
+    name: "ESP - Restart"
+    entity_category: diagnostic
+
+# ============================================================
+# SENSORS
+# ============================================================
+
+sensor:
+  # ----------------------------------------------------------
+  # TARGET  —  speed-and-distance mode only. The C4001 tracks
+  # one target. No value in presence mode (web page only).
+  #
+  #   Target - Count      0 or 1
+  #   Target - Distance   m
+  #   Target - Speed      m/s, positive = moving away
+  #   Target - Energy     signal strength, no unit
+  # ----------------------------------------------------------
+  - platform: dfrobot_mmwave
+    target_count:
+      name: "Target - Count"
+      internal: true
+    target_1_distance:
+      name: "Target - Distance"
+      internal: true
+      filters:
+        - throttle_with_priority: ${target_throttle}
+    target_1_speed:
+      name: "Target - Speed"
+      internal: true
+      filters:
+        - throttle_with_priority: ${target_throttle}
+    target_1_energy:
+      name: "Target - Energy"
+      internal: true
+      filters:
+        - throttle_with_priority: ${target_throttle}
+
+  # ----------------------------------------------------------
+  # DIAGNOSTICS  (interval: diag_interval)
+  # ----------------------------------------------------------
+  - platform: internal_temperature
+    name: "ESP - Temperature"
+    entity_category: diagnostic
+    update_interval: ${diag_interval}
+
+  - platform: wifi_signal
+    name: "ESP - WiFi Signal"
+    entity_category: diagnostic
+    update_interval: ${diag_interval}
+
+  - platform: uptime
+    name: "ESP - Uptime"
+    entity_category: diagnostic
+    update_interval: ${diag_interval}
