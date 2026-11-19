@@ -1457,7 +1457,7 @@ uint16_t Engine::couple_ranges_() {
   const float mx = this->value_for_(max_id);
   if (!finite(trig) || !finite(mx))
     return 0;
-  static constexpr float EPS = 1e-3f;
+  static constexpr float RANGE_EPSILON = 1e-3f;
   ParamId adj_id;
   float adj;
   if (trig_req) {
